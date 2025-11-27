@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Doppler Effect Simulator</title>
+    <!-- Load Tailwind CSS for styling the UI/controls --><script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Three.js for 3D rendering --><script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Load OrbitControls for adjustable camera rotation and zoom --><script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Optional: GLTFLoader for loading 3D models --><script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <style>
+        /* Custom styles for the simulation */
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            background-color: #1f2937; /* Dark background */
+            color: #f9fafb;
+            height: 100vh;
+        }
+        #simulation-container {
+            flex-grow: 1;
+            position: relative;
+        }
+        canvas {
+            display: block;
+        }
+        .info-label {
+            position: absolute;
+            font-size: 0.8rem;
+            font-weight: bold;
+            text-align: center;
+            padding: 4px 8px;
+            border-radius: 4px;
+            z-index: 10;
+        }
+        .higher-freq {
+            color: #ef4444; /* Red for higher */
+            left: 70%;
+            top: 10%;
+            transform: translateX(-50%);
+        }
+        .lower-freq {
+            color: #3b82f6; /* Blue for lower */
+            left: 30%;
+            top: 10%;
+            transform: translateX(-50%);
+        }
+        .waveform-icon {
+            display: inline-block;
+            width: 20px;
+            height: 12px;
+            border-bottom: 2px solid;
+            position: relative;
+            margin-left: 5px;
+        }
+        .waveform-icon::before, .waveform-icon::after {
+            content: '';
+            position: absolute;
+            top: -6px;
+            border-left: 2px solid;
+            height: 12px;
+        }
+        .waveform-icon::before { left: 0; }
+        .waveform-icon::after { left: 6px; }
+
+        .waveform-icon.high::before, .waveform-icon.high::after {
+            height: 10px; /* Shorter waves for high frequency */
+            top: -5px;
+        }
+        .waveform-icon.high::before { left: 0; }
+        .waveform-icon.high::after { left: 4px; } /* Closer together */
+
+        .waveform-icon.low::before, .waveform-icon.low::after {
+            height: 14px; /* Taller waves for low frequency */
+            top: -7px;
+        }
+        .waveform-icon.low::before { left: 0; }
+        .waveform-icon.low::after { left: 8px; } /* Further apart */
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#3b82f6',
+                        'secondary': '#60a5fa',
+                        'accent': '#f87171',
+                        'bg-dark': '#111827',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="simulation-container">
+        <div id="higher-freq-label" class="info-label higher-freq">
+            Higher frequency<br>(higher pitch)
+            <span class="waveform-icon high" style="border-color: #ef4444; color: #ef4444;"></span>
+        </div>
+        <div id="lower-freq-label" class="info-label lower-freq">
+            Lower frequency<br>(lower pitch)
+            <span class="waveform-icon low" style="border-color: #3b82f6; color: #3b82f6;"></span>
+        </div>
+    </div>
+
+    <!-- Control Panel --><div class="p-4 w-64 bg-bg-dark flex flex-col space-y-4 shadow-lg overflow-y-auto">
+        <h1 class="text-xl font-bold text-primary border-b border-gray-700 pb-2">Doppler Simulation</h1>
+        <p class="text-sm text-gray-400">Watch how wave fronts compress when the source moves toward an observer and expand when it moves away.</p>
+
+        <!-- Source Speed Control --><div class="space-y-1">
+            <label for="speed-range" class="block text-sm font-medium">Source Velocity:</label>
+            <input type="range" id="speed-range" min="0.01" max="0.3" step="0.01" value="0.1"
+                   class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-lg">
+            <p id="speed-value" class="text-xs text-secondary text-right">0.10 units/frame</p>
+        </div>
+
+        <!-- Wave Frequency Control --><div class="space-y-1">
+            <label for="frequency-range" class="block text-sm font-medium">Wave Emission Rate (Hz):</label>
+            <input type="range" id="frequency-range" min="1" max="10" step="1" value="5"
+                   class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-lg">
+            <p id="frequency-value" class="text-xs text-secondary text-right">5 waves/second</p>
+        </div>
+
+        <!-- Wave Speed Control --><div class="space-y-1">
+            <label for="wave-speed-range" class="block text-sm font-medium">Wave Speed:</label>
+            <input type="range" id="wave-speed-range" min="0.05" max="0.5" step="0.01" value="0.2"
+                   class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-lg">
+            <p id="wave-speed-value" class="text-xs text-secondary text-right">0.20 units/frame</p>
+        </div>
+
+        <div class="mt-4 pt-4 border-t border-gray-700">
+            <p class="text-xs text-gray-500">Source: Moving Ambulance</p>
+            <p class="text-xs text-gray-500">Waves: Blue Rings</p>
+            <p class="text-xs text-gray-500">Observers: Stick Figures</p>
+            <p class="text-xs text-gray-500 mt-2">Use your mouse (left click to rotate, right click to pan, scroll to zoom) to adjust the view!</p>
+        </div>
+    </div>
+
+    <script type="module">
+        // Three.js setup variables
+        let scene, camera, renderer, controls;
+        let ambulance; // The moving ambulance model
+        let waves = []; // Array to hold all emitted wave spheres
+        let clock = new THREE.Clock();
+        let lastWaveTime = 0;
+
+        // Simulation parameters
+        const SIM_CONFIG = {
+            sourceVelocity: 0.1, // units per frame
+            waveEmissionRate: 5, // waves per second (Hz)
+            waveSpeed: 0.2, // units per frame (Speed of sound in this simulation)
+            sourceMaxX: 10, // Max distance the source travels from center
+            sourcePosition: 0,
+            sourceDirection: 1, // 1 for right, -1 for left
+        };
+
+        const container = document.getElementById('simulation-container');
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+
+        function init() {
+            // Scene setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111827);
+
+            // Camera setup (Observer position)
+            camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+            camera.position.set(0, 8, 25);
+            // We remove camera.lookAt(0, 0, 0) as OrbitControls will handle this
+
+            // Renderer setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(width, height);
+            container.appendChild(renderer.domElement);
+
+            // Initialize OrbitControls for full 3D control
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.target.set(0, 0, 0); // Focus on the center of the road
+            controls.enableDamping = true; // For smoother controls
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 5;
+            controls.maxDistance = 100;
+            controls.update(); // Initial update to apply target
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 20, 10);
+            scene.add(directionalLight);
+            const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+            directionalLight2.position.set(-10, 10, -10);
+            scene.add(directionalLight2);
+
+
+            // Ground Plane (for context)
+            const planeGeometry = new THREE.PlaneGeometry(50, 50);
+            const planeMaterial = new THREE.MeshPhongMaterial({ color: 0x374151, side: THREE.DoubleSide });
+            const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+            plane.rotation.x = Math.PI / 2;
+            plane.position.y = -0.5;
+            scene.add(plane);
+
+            // Load the Ambulance Model (placeholder - a simple box for now)
+            createAmbulanceModel();
+
+            // Create Observers
+            createObserver(-15, 0, "Observer Left"); // Left observer
+            createObserver(15, 0, "Observer Right"); // Right observer
+
+            // Event listeners for controls
+            setupControls();
+
+            // Handle resizing
+            window.addEventListener('resize', onWindowResize, false);
+            
+            // Removed custom mouse rotation listeners, as OrbitControls handles them.
+        }
+
+        function createAmbulanceModel() {
+            const ambulanceGroup = new THREE.Group();
+
+            // Main body
+            const bodyGeometry = new THREE.BoxGeometry(4, 2, 2);
+            const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff }); // White
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            ambulanceGroup.add(body);
+
+            // Red cross
+            const crossMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000 }); // Red
+            const crossVerticalGeometry = new THREE.BoxGeometry(0.3, 1.5, 0.1);
+            const crossHorizontalGeometry = new THREE.BoxGeometry(1.5, 0.3, 0.1);
+            const crossVertical = new THREE.Mesh(crossVerticalGeometry, crossMaterial);
+            const crossHorizontal = new THREE.Mesh(crossHorizontalGeometry, crossMaterial);
+            crossVertical.position.set(0, 0, 1.01);
+            crossHorizontal.position.set(0, 0, 1.01);
+            ambulanceGroup.add(crossVertical);
+            ambulanceGroup.add(crossHorizontal);
+
+            // Siren light
+            const sirenGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.5, 16);
+            const sirenMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000, emissive: 0xaa0000 });
+            const siren = new THREE.Mesh(sirenGeometry, sirenMaterial);
+            siren.position.set(0, 1.2, 0);
+            ambulanceGroup.add(siren);
+
+            // Wheels (simplified)
+            const wheelGeometry = new THREE.CylinderGeometry(0.7, 0.7, 0.5, 12);
+            const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
+            const wheel1 = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            wheel1.rotation.z = Math.PI / 2;
+            wheel1.position.set(-1.5, -1, 1);
+            ambulanceGroup.add(wheel1);
+            const wheel2 = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            wheel2.rotation.z = Math.PI / 2;
+            wheel2.position.set(1.5, -1, 1);
+            ambulanceGroup.add(wheel2);
+            const wheel3 = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            wheel3.rotation.z = Math.PI / 2;
+            wheel3.position.set(-1.5, -1, -1);
+            ambulanceGroup.add(wheel3);
+            const wheel4 = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            wheel4.rotation.z = Math.PI / 2;
+            wheel4.position.set(1.5, -1, -1);
+            ambulanceGroup.add(wheel4);
+
+            ambulance = ambulanceGroup;
+            ambulance.position.y = 1.0; // Lift off the ground slightly
+            // Initial rotation to face the right direction (1)
+            ambulance.rotation.y = -Math.PI / 2; 
+            scene.add(ambulance);
+        }
+
+        function createObserver(xPos, zPos, name) {
+            const observerGroup = new THREE.Group();
+
+            // Body
+            const bodyGeometry = new THREE.CylinderGeometry(0.3, 0.3, 2, 16);
+            const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x3b82f6 });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            observerGroup.add(body);
+
+            // Head
+            const headGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+            const headMaterial = new THREE.MeshPhongMaterial({ color: 0xefefef });
+            const head = new THREE.Mesh(headGeometry, headMaterial);
+            head.position.y = 1.2;
+            observerGroup.add(head);
+
+            observerGroup.position.set(xPos, 0.5, zPos);
+            scene.add(observerGroup);
+            return observerGroup;
+        }
+
+
+        function setupControls() {
+            const speedRange = document.getElementById('speed-range');
+            const speedValue = document.getElementById('speed-value');
+            const frequencyRange = document.getElementById('frequency-range');
+            const frequencyValue = document.getElementById('frequency-value');
+            const waveSpeedRange = document.getElementById('wave-speed-range');
+            const waveSpeedValue = document.getElementById('wave-speed-value');
+
+            speedRange.oninput = (e) => {
+                SIM_CONFIG.sourceVelocity = parseFloat(e.target.value);
+                speedValue.textContent = SIM_CONFIG.sourceVelocity.toFixed(2) + ' units/frame';
+            };
+
+            frequencyRange.oninput = (e) => {
+                SIM_CONFIG.waveEmissionRate = parseInt(e.target.value, 10);
+                frequencyValue.textContent = SIM_CONFIG.waveEmissionRate + ' waves/second';
+            };
+
+            waveSpeedRange.oninput = (e) => {
+                SIM_CONFIG.waveSpeed = parseFloat(e.target.value);
+                waveSpeedValue.textContent = SIM_CONFIG.waveSpeed.toFixed(2) + ' units/frame';
+            };
+        }
+
+        function createWave(position) {
+            // Use a thin cylinder/ring to represent the wave front
+            // The radius starts at 0 and expands
+            const geometry = new THREE.CylinderGeometry(0.01, 0.01, 0.1, 64, 1, true);
+            const material = new THREE.MeshBasicMaterial({
+                color: 0x3b82f6, // Blue
+                transparent: true,
+                opacity: 0.8,
+                wireframe: true // Looks great as a wave front
+            });
+
+            const wave = new THREE.Mesh(geometry, material);
+            wave.rotation.x = Math.PI / 2; // Lay flat on the XZ plane
+            wave.position.copy(position);
+            wave.scale.set(1, 1, 1); // Initial scale (radius of 0.01 is too small to see, scale will grow)
+
+            // Store metadata for the wave
+            wave.userData = {
+                birthPosition: position.clone(),
+                radius: 0.01, // Current radius/scale
+                opacity: 0.8,
+            };
+
+            waves.push(wave);
+            scene.add(wave);
+        }
+
+        function updateSource(delta) {
+            // Simple back and forth movement along the X-axis
+            SIM_CONFIG.sourcePosition += SIM_CONFIG.sourceVelocity * SIM_CONFIG.sourceDirection;
+
+            if (SIM_CONFIG.sourcePosition > SIM_CONFIG.sourceMaxX) {
+                SIM_CONFIG.sourceDirection = -1;
+                // Rotate ambulance to face direction of travel (Left)
+                ambulance.rotation.y = Math.PI / 2;
+            } else if (SIM_CONFIG.sourcePosition < -SIM_CONFIG.sourceMaxX) {
+                SIM_CONFIG.sourceDirection = 1;
+                // Rotate ambulance to face direction of travel (Right)
+                ambulance.rotation.y = -Math.PI / 2;
+            }
+
+            ambulance.position.x = SIM_CONFIG.sourcePosition;
+        }
+
+        function updateWaves(delta) {
+            const waveSpeedPerFrame = SIM_CONFIG.waveSpeed;
+
+            // 1. Emit new wave if time interval has passed
+            const timeSinceLastWave = clock.getElapsedTime() - lastWaveTime;
+            const interval = 1 / SIM_CONFIG.waveEmissionRate;
+
+            if (timeSinceLastWave >= interval) {
+                createWave(ambulance.position); // Emit from ambulance's current position
+                lastWaveTime = clock.getElapsedTime();
+            }
+
+            // 2. Update existing waves (grow and fade)
+            for (let i = waves.length - 1; i >= 0; i--) {
+                const wave = waves[i];
+                const userData = wave.userData;
+
+                // Increase radius
+                userData.radius += waveSpeedPerFrame;
+
+                // Update scale/size of the wave mesh
+                wave.scale.set(userData.radius, userData.radius, 1);
+
+                // Fade out (using opacity)
+                userData.opacity -= 0.005; // Fade factor
+                wave.material.opacity = userData.opacity;
+
+                // Remove the wave if it's completely faded or too large
+                if (userData.opacity <= 0 || userData.radius > 50) {
+                    scene.remove(wave);
+                    waves.splice(i, 1);
+                    wave.geometry.dispose();
+                    wave.material.dispose();
+                }
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta(); // Time elapsed since last frame
+
+            updateSource(delta);
+            updateWaves(delta);
+
+            // Crucial: Update OrbitControls
+            controls.update();
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            const newWidth = container.clientWidth;
+            const newHeight = container.clientHeight;
+
+            camera.aspect = newWidth / newHeight;
+            camera.updateProjectionMatrix();
+
+            renderer.setSize(newWidth, newHeight);
+        }
+
+        window.onload = function () {
+            init();
+            animate();
+        };
+
+    </script>
+</body>
+</html>
