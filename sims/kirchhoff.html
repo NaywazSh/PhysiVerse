@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kirchhoff's Laws 3D Simulation</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Font for Math -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050510; color: white; font-family: 'Roboto Mono', monospace; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 0; }
+        
+        /* Neon UI Styling */
+        .neon-box {
+            background: rgba(10, 15, 30, 0.85);
+            border: 1px solid #4ade80;
+            box-shadow: 0 0 10px rgba(74, 222, 128, 0.2);
+            backdrop-filter: blur(5px);
+        }
+        .neon-text-blue { color: #38bdf8; text-shadow: 0 0 5px rgba(56, 189, 248, 0.8); }
+        .neon-text-green { color: #4ade80; text-shadow: 0 0 5px rgba(74, 222, 128, 0.8); }
+        .neon-text-red { color: #f87171; text-shadow: 0 0 5px rgba(248, 113, 113, 0.8); }
+        
+        /* Sliders */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 2px solid #38bdf8;
+            margin-top: -6px;
+            box-shadow: 0 0 10px #38bdf8;
+            cursor: pointer;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #1e293b;
+            border-radius: 2px;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <!-- 3D Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- UI Overlay -->
+    <div class="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col justify-between p-4 z-10">
+        
+        <!-- Header / Tabs -->
+        <div class="pointer-events-auto flex justify-center gap-4 mt-2">
+            <button id="btn-kcl" onclick="switchMode('kcl')" class="neon-box px-6 py-3 rounded text-lg font-bold hover:bg-slate-800 transition-all text-cyan-400 border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.3)]">
+                KCL: Current Law
+            </button>
+            <button id="btn-kvl" onclick="switchMode('kvl')" class="neon-box px-6 py-3 rounded text-lg font-bold hover:bg-slate-800 transition-all text-gray-400 border-gray-600">
+                KVL: Voltage Law
+            </button>
+        </div>
+
+        <!-- Controls Panel -->
+        <div class="pointer-events-auto absolute top-24 right-4 w-80 max-h-[80vh] overflow-y-auto neon-box rounded-lg p-4 transition-all duration-300">
+            
+            <!-- KCL Controls -->
+            <div id="controls-kcl">
+                <h2 class="text-xl font-bold mb-2 neon-text-blue border-b border-gray-700 pb-2">Node Analysis</h2>
+                <div class="text-xs text-gray-400 mb-4">
+                    Formula: <span class="text-green-400">i1 + i5</span> = <span class="text-red-400">i2 + i3 + i4</span>
+                </div>
+
+                <div class="space-y-4">
+                    <!-- Inputs -->
+                    <div>
+                        <label class="block text-sm font-bold text-green-400 mb-1">Incoming Currents (Amps)</label>
+                        <div class="flex items-center gap-2">
+                            <span class="w-6 text-xs">i1</span>
+                            <input type="range" min="0" max="10" step="0.5" value="5" id="slider-i1" oninput="updateKCL()">
+                            <span id="val-i1" class="w-8 text-right text-xs">5.0</span>
+                        </div>
+                        <div class="flex items-center gap-2 mt-2">
+                            <span class="w-6 text-xs">i5</span>
+                            <input type="range" min="0" max="10" step="0.5" value="3" id="slider-i5" oninput="updateKCL()">
+                            <span id="val-i5" class="w-8 text-right text-xs">3.0</span>
+                        </div>
+                    </div>
+
+                    <div class="h-px bg-gray-700 my-2"></div>
+
+                    <!-- Outputs (Read Only visualization mostly, or proportionally distributed) -->
+                    <div>
+                        <label class="block text-sm font-bold text-red-400 mb-1">Outgoing Currents (Balanced)</label>
+                        <p class="text-xs text-gray-400 mb-2">Adjust resistances to change distribution</p>
+                        
+                        <div class="flex items-center gap-2">
+                            <span class="w-6 text-xs">i2</span>
+                            <div class="w-full bg-gray-800 h-2 rounded overflow-hidden">
+                                <div id="bar-i2" class="h-full bg-red-500 transition-all duration-300" style="width: 33%"></div>
+                            </div>
+                            <span id="val-i2" class="w-8 text-right text-xs">--</span>
+                        </div>
+                        <div class="flex items-center gap-2 mt-2">
+                            <span class="w-6 text-xs">i3</span>
+                            <div class="w-full bg-gray-800 h-2 rounded overflow-hidden">
+                                <div id="bar-i3" class="h-full bg-red-500 transition-all duration-300" style="width: 33%"></div>
+                            </div>
+                            <span id="val-i3" class="w-8 text-right text-xs">--</span>
+                        </div>
+                        <div class="flex items-center gap-2 mt-2">
+                            <span class="w-6 text-xs">i4</span>
+                            <div class="w-full bg-gray-800 h-2 rounded overflow-hidden">
+                                <div id="bar-i4" class="h-full bg-red-500 transition-all duration-300" style="width: 33%"></div>
+                            </div>
+                            <span id="val-i4" class="w-8 text-right text-xs">--</span>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 p-2 bg-slate-900 rounded text-center">
+                        <div class="text-xs text-gray-400">Total Current In/Out</div>
+                        <div class="text-2xl font-bold neon-text-blue" id="kcl-total">8.0 A</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KVL Controls -->
+            <div id="controls-kvl" class="hidden">
+                <h2 class="text-xl font-bold mb-2 neon-text-green border-b border-gray-700 pb-2">Loop Analysis</h2>
+                <div class="text-xs text-gray-400 mb-4">
+                    Formula: &Sigma;V_rise = &Sigma;V_drop
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-bold text-green-400 mb-1">Source Voltage (Vs)</label>
+                        <div class="flex items-center gap-2">
+                            <span class="w-8 text-xs">Volts</span>
+                            <input type="range" min="1" max="24" step="1" value="12" id="slider-vs" oninput="updateKVL()">
+                            <span id="val-vs" class="w-8 text-right text-xs">12</span>
+                        </div>
+                    </div>
+
+                    <div class="h-px bg-gray-700 my-2"></div>
+
+                    <div>
+                        <label class="block text-sm font-bold text-red-400 mb-1">Resistors (&Omega;)</label>
+                        <!-- Resistor 1 -->
+                        <div class="flex items-center gap-2">
+                            <span class="w-6 text-xs text-blue-300">R1</span>
+                            <input type="range" min="1" max="10" step="0.5" value="2" id="slider-r1" oninput="updateKVL()">
+                            <span id="val-r1" class="w-8 text-right text-xs">2</span>
+                        </div>
+                         <!-- Resistor 2 -->
+                         <div class="flex items-center gap-2 mt-1">
+                            <span class="w-6 text-xs text-blue-300">R2</span>
+                            <input type="range" min="1" max="10" step="0.5" value="4" id="slider-r2" oninput="updateKVL()">
+                            <span id="val-r2" class="w-8 text-right text-xs">4</span>
+                        </div>
+                         <!-- Resistor 3 -->
+                         <div class="flex items-center gap-2 mt-1">
+                            <span class="w-6 text-xs text-blue-300">R3</span>
+                            <input type="range" min="1" max="10" step="0.5" value="2" id="slider-r3" oninput="updateKVL()">
+                            <span id="val-r3" class="w-8 text-right text-xs">2</span>
+                        </div>
+                         <!-- Resistor 4 -->
+                         <div class="flex items-center gap-2 mt-1">
+                            <span class="w-6 text-xs text-blue-300">R4</span>
+                            <input type="range" min="1" max="10" step="0.5" value="4" id="slider-r4" oninput="updateKVL()">
+                            <span id="val-r4" class="w-8 text-right text-xs">4</span>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center mt-4">
+                        <input type="checkbox" id="check-elevation" class="mr-2" onchange="toggleElevation()">
+                        <label for="check-elevation" class="text-sm cursor-pointer select-none">Show 3D Potential View</label>
+                    </div>
+
+                    <div class="mt-4 p-2 bg-slate-900 rounded text-center">
+                        <div class="text-xs text-gray-400">System Current (I)</div>
+                        <div class="text-2xl font-bold neon-text-green" id="kvl-current">1.0 A</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Legend / Info Bottom Left -->
+        <div class="pointer-events-auto absolute bottom-4 left-4 neon-box p-3 rounded max-w-sm">
+             <div id="info-kcl">
+                <h3 class="font-bold text-cyan-400">Current Law (Conservation of Charge)</h3>
+                <p class="text-xs text-gray-300 mt-1">The sum of currents entering a junction equals the sum of currents leaving it.</p>
+                <div class="flex gap-2 mt-2 text-xs">
+                    <span class="text-green-400">● In (i1, i5)</span>
+                    <span class="text-red-400">● Out (i2, i3, i4)</span>
+                </div>
+             </div>
+             <div id="info-kvl" class="hidden">
+                <h3 class="font-bold text-green-400">Voltage Law (Conservation of Energy)</h3>
+                <p class="text-xs text-gray-300 mt-1">The directed sum of potential differences (voltages) around any closed loop is zero.</p>
+             </div>
+        </div>
+    </div>
+
+    <!-- Script -->
+    <script>
+        // --- 1. SETUP THREE.JS ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050510, 0.02); // Distance fog for depth
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 20, 30);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 + 0.1; // Don't go too far below ground
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        const pointLight = new THREE.PointLight(0x38bdf8, 1, 100);
+        pointLight.position.set(0, 10, 0);
+        scene.add(pointLight);
+
+        // --- 2. GLOBAL STATE ---
+        const state = {
+            mode: 'kcl', // 'kcl' or 'kvl'
+            kcl: {
+                i1: 5, i5: 3, // In
+                i2: 0, i3: 0, i4: 0, // Out (calculated)
+                r_ratios: { i2: 1, i3: 1, i4: 1 } // Resistance ratios defining output split
+            },
+            kvl: {
+                vs: 12,
+                r: [2, 4, 2, 4], // R1, R2, R3, R4
+                i: 0,
+                drops: [0,0,0,0],
+                elevationMode: false
+            }
+        };
+
+        const groups = {
+            kcl: new THREE.Group(),
+            kvl: new THREE.Group()
+        };
+        scene.add(groups.kcl);
+        scene.add(groups.kvl);
+        groups.kvl.visible = false;
+
+        // --- 3. MATERIALS & GEOMETRY HELPERS ---
+        // ORIGINAL NEON MATERIALS
+        // const matNeonBlue = new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x22d3ee, emissiveIntensity: 0.8 });
+        // const matNeonGreen = new THREE.MeshStandardMaterial({ color: 0x4ade80, emissive: 0x4ade80, emissiveIntensity: 0.8 });
+        // const matNeonRed = new THREE.MeshStandardMaterial({ color: 0xf87171, emissive: 0xf87171, emissiveIntensity: 0.8 });
+        
+        // NEW BRIGHT PASTEL MATERIALS for wires/rods
+        const matPastelBlue = new THREE.MeshStandardMaterial({ color: 0x87CEEB, emissive: 0x87CEEB, emissiveIntensity: 0.5 }); // Sky Blue
+        const matPastelGreen = new THREE.MeshStandardMaterial({ color: 0x98FB98, emissive: 0x98FB98, emissiveIntensity: 0.5 }); // Pale Green
+        const matPastelRed = new THREE.MeshStandardMaterial({ color: 0xFFA07A, emissive: 0xFFA07A, emissiveIntensity: 0.5 }); // Light Salmon
+
+        // These materials are for particles and labels, keeping original vibrancy
+        const matParticleIn = new THREE.MeshBasicMaterial({ color: 0x4ade80 }); // Vibrant Green
+        const matParticleOut = new THREE.MeshBasicMaterial({ color: 0xf87171 }); // Vibrant Red
+
+        const matDarkMetal = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.8 });
+        
+        function createTextTexture(text, color) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = color;
+            ctx.font = 'bold 60px Roboto Mono';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, 128, 64);
+            const tex = new THREE.CanvasTexture(canvas);
+            return tex;
+        }
+
+        function createLabel(text, color, pos) {
+            const spriteMat = new THREE.SpriteMaterial({ map: createTextTexture(text, color) });
+            const sprite = new THREE.Sprite(spriteMat);
+            sprite.scale.set(4, 2, 1);
+            sprite.position.copy(pos);
+            return sprite;
+        }
+
+        // --- 4. BUILD KCL SCENE ---
+        // Star shape: Center node + 5 arms
+        const kclObjects = { particles: [], labels: [], wires: [] }; // Added wires to update color
+
+        function initKCL() {
+            // Central Node
+            const nodeGeo = new THREE.SphereGeometry(1.5, 32, 32);
+            const nodeMesh = new THREE.Mesh(nodeGeo, matDarkMetal);
+            groups.kcl.add(nodeMesh);
+
+            // Glow for node
+            const glowGeo = new THREE.SphereGeometry(1.7, 32, 32);
+            const glowMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.3 });
+            const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+            groups.kcl.add(glowMesh);
+
+            // Arms (Cylinders) - Configured to match image somewhat
+            // i1 (Top), i2 (Left), i3 (BotLeft), i4 (BotRight), i5 (Right)
+            const armLength = 10;
+            
+            // Correction for "Up" in XZ plane (Top view) is -Z. 
+            // Let's rotate coordinates: i1 is -Z. i5 is +X. i2 is -X.
+            const armConfigs = [
+                { id: 'i1', dir: new THREE.Vector3(0, 0, -1), type: 'in' },
+                { id: 'i5', dir: new THREE.Vector3(1, 0, 0), type: 'in' },
+                { id: 'i4', dir: new THREE.Vector3(0.7, 0, 0.7).normalize(), type: 'out' },
+                { id: 'i3', dir: new THREE.Vector3(-0.7, 0, 0.7).normalize(), type: 'out' },
+                { id: 'i2', dir: new THREE.Vector3(-1, 0, 0), type: 'out' }
+            ];
+
+            armConfigs.forEach(arm => {
+                // Wire
+                const cylGeo = new THREE.CylinderGeometry(0.2, 0.2, armLength, 16);
+                cylGeo.translate(0, armLength/2, 0); // Pivot at bottom
+                cylGeo.rotateX(Math.PI/2); // Lie flat
+                const wireMaterial = arm.type === 'in' ? matPastelGreen : matPastelRed; // Use pastel color for wires
+                const wire = new THREE.Mesh(cylGeo, wireMaterial);
+                
+                // Align wire to direction
+                wire.lookAt(arm.dir);
+                groups.kcl.add(wire);
+                kclObjects.wires.push(wire); // Store wire reference
+
+                // Label
+                const labelPos = arm.dir.clone().multiplyScalar(armLength + 1);
+                labelPos.y = 1; 
+                const colorStr = arm.type === 'in' ? '#4ade80' : '#f87171'; // Labels remain vibrant
+                const label = createLabel(arm.id, colorStr, labelPos);
+                groups.kcl.add(label);
+                kclObjects.labels.push({ id: arm.id, sprite: label });
+
+                // Particles System for this arm
+                const particleCount = 20;
+                const pGeo = new THREE.SphereGeometry(0.15, 8, 8);
+                const pMat = arm.type === 'in' ? matParticleIn : matParticleOut; // Particles remain vibrant
+                
+                for(let i=0; i<particleCount; i++) {
+                    const p = new THREE.Mesh(pGeo, pMat);
+                    groups.kcl.add(p);
+                    // Store metadata for animation
+                    kclObjects.particles.push({
+                        mesh: p,
+                        armDir: arm.dir,
+                        armType: arm.type, // 'in' or 'out'
+                        armId: arm.id,
+                        progress: Math.random(), // 0 to 1
+                        speedBase: 0.01 // Will be scaled by current
+                    });
+                }
+
+                // Arrow Helper (Static visual)
+                const arrowLen = 2;
+                // If In: Arrow points TO center (Opposite to dir). If Out: Points FROM center (Same as dir).
+                const arrowDir = arm.type === 'in' ? arm.dir.clone().negate() : arm.dir;
+                const arrowOrigin = arm.dir.clone().multiplyScalar(armLength/2);
+                const arrowColor = arm.type === 'in' ? 0x4ade80 : 0xf87171; // Arrows remain vibrant
+                const arrow = new THREE.ArrowHelper(arrowDir, arrowOrigin, arrowLen, arrowColor, 1, 1);
+                groups.kcl.add(arrow);
+            });
+        }
+
+        // --- 5. BUILD KVL SCENE ---
+        // Rectangular Loop
+        const kvlObjects = { segments: [], nodes: [], labels: [] };
+        
+        function initKVL() {
+            // Define precise dimensions
+            // Loop: Width X = 18 (-9 to 9), Depth Z = 10 (-5 to 5)
+            
+            // Add Corner Nodes (Spheres) for perfect connections
+            const cornerGeo = new THREE.SphereGeometry(0.4, 16, 16);
+            const corners = [
+                new THREE.Vector3(-9, 0, 5),  // Bot-Left
+                new THREE.Vector3(-9, 0, -5), // Top-Left
+                new THREE.Vector3(9, 0, -5),  // Top-Right
+                new THREE.Vector3(9, 0, 5)    // Bot-Right
+            ];
+            
+            corners.forEach(pos => {
+                const mesh = new THREE.Mesh(cornerGeo, matPastelBlue);
+                mesh.position.copy(pos);
+                groups.kvl.add(mesh);
+                // Add to components array as null/dummy so indices shift? 
+                // No, let's keep components strictly as the path elements for elevation logic.
+                // We'll just add these to the group and animate their elevation manually or link them.
+                // Actually, simplest is to treat corners as "wires" in the component list for elevation.
+            });
+
+            // Constructing logic components (Wires, Sources, Resistors)
+            // Path: Start Bot-Left (-9,0,5) -> Up -> Right -> Down -> Left -> Close
+            
+            kvlObjects.components = [
+                // --- LEFT SIDE (Z Axis, X=-9) ---
+                // 1. Wire Bot to Source
+                { type: 'wire', len: 4, axis: 'z', pos: new THREE.Vector3(-9, 0, 3) }, // Z=5 to Z=1
+                // 2. Source (Center at 0)
+                { type: 'source', len: 2, axis: 'z', pos: new THREE.Vector3(-9, 0, 0), label: 'Vs' }, // Z=1 to Z=-1
+                // 3. Wire Source to Top
+                { type: 'wire', len: 4, axis: 'z', pos: new THREE.Vector3(-9, 0, -3) }, // Z=-1 to Z=-5
+                
+                // Corner Node 1 (Top Left) - Implicitly handled by gap filling or we add a small wire/node
+                
+                // --- TOP SIDE (X Axis, Z=-5) ---
+                // 4. Wire Top-Left to R1. (Start -9. R1 starts at -4.5). Center -6.75, Len 4.5
+                { type: 'wire', len: 4.5, axis: 'x', pos: new THREE.Vector3(-6.75, 0, -5) },
+                // 5. R1 (Pos -3, Len 3). Occ -4.5 to -1.5
+                { type: 'resistor', id: 'r1', len: 3, axis: 'x', pos: new THREE.Vector3(-3, 0, -5), label: 'R1' },
+                // 6. Wire Mid (Pos 0, Len 3). Occ -1.5 to 1.5
+                { type: 'wire', len: 3, axis: 'x', pos: new THREE.Vector3(0, 0, -5) },
+                // 7. R2 (Pos 3, Len 3). Occ 1.5 to 4.5
+                { type: 'resistor', id: 'r2', len: 3, axis: 'x', pos: new THREE.Vector3(3, 0, -5), label: 'R2' },
+                // 8. Wire Top-Right (Pos 6.75, Len 4.5). Occ 4.5 to 9
+                { type: 'wire', len: 4.5, axis: 'x', pos: new THREE.Vector3(6.75, 0, -5) },
+                
+                // --- RIGHT SIDE (Z Axis, X=9) ---
+                // 9. Wire Top to R3. (Start -5. R3 starts -1.5). Center -3.25, Len 3.5
+                { type: 'wire', len: 3.5, axis: 'z', pos: new THREE.Vector3(9, 0, -3.25) },
+                // 10. R3 (Pos 0, Len 3). Occ -1.5 to 1.5
+                { type: 'resistor', id: 'r3', len: 3, axis: 'z', pos: new THREE.Vector3(9, 0, 0), label: 'R3' },
+                // 11. Wire Bot (Pos 3.25, Len 3.5). Occ 1.5 to 5
+                { type: 'wire', len: 3.5, axis: 'z', pos: new THREE.Vector3(9, 0, 3.25) },
+                
+                // --- BOTTOM SIDE (X Axis, Z=5) ---
+                // 12. Wire Right to R4. (Start 9. R4 starts 1.5). Center 5.25, Len 7.5
+                { type: 'wire', len: 7.5, axis: 'x', pos: new THREE.Vector3(5.25, 0, 5) },
+                // 13. R4 (Pos 0, Len 3). Occ 1.5 to -1.5
+                { type: 'resistor', id: 'r4', len: 3, axis: 'x', pos: new THREE.Vector3(0, 0, 5), label: 'R4' },
+                // 14. Wire Left (Pos -5.25, Len 7.5). Occ -1.5 to -9
+                { type: 'wire', len: 7.5, axis: 'x', pos: new THREE.Vector3(-5.25, 0, 5) },
+            ];
+
+            // Build Meshes
+            kvlObjects.components.forEach(comp => {
+                const group = new THREE.Group();
+                group.position.copy(comp.pos);
+                
+                let mesh;
+                if(comp.type === 'wire') {
+                    const geo = new THREE.CylinderGeometry(0.15, 0.15, comp.len, 8); // Slightly thicker
+                    geo.rotateZ(Math.PI/2); // Default aligns along X
+                    if(comp.axis === 'z') geo.rotateY(Math.PI/2);
+                    mesh = new THREE.Mesh(geo, matPastelBlue); 
+                } else if (comp.type === 'source') {
+                    const geo = new THREE.BoxGeometry(2, 1, 1);
+                    if(comp.axis === 'z') geo.rotateY(Math.PI/2);
+                    mesh = new THREE.Mesh(geo, matPastelGreen); 
+                    const label = createLabel('+', '#ffffff', new THREE.Vector3(0, 1.5, 0));
+                    group.add(label);
+                } else if (comp.type === 'resistor') {
+                    const geo = new THREE.BoxGeometry(3, 0.6, 0.6);
+                    if(comp.axis === 'z') geo.rotateY(Math.PI/2);
+                    mesh = new THREE.Mesh(geo, matPastelRed); 
+                    
+                    const label = createLabel(comp.label, '#f87171', new THREE.Vector3(0, 1.5, 0));
+                    const vLabel = createLabel('0V', '#ffffff', new THREE.Vector3(0, -1.5, 0));
+                    vLabel.scale.set(3, 1.5, 1);
+                    group.add(label);
+                    group.add(vLabel);
+                    comp.vLabelSprite = vLabel;
+                }
+                
+                group.add(mesh);
+                comp.meshGroup = group; 
+                groups.kvl.add(group);
+            });
+            
+            // Link Corners to the nearest component for elevation animation
+            // BL(-9,0,5) -> Matches Comp 0 or 13.
+            // TL(-9,0,-5) -> Matches Comp 2 or 3.
+            // TR(9,0,-5) -> Matches Comp 7 or 8.
+            // BR(9,0,5) -> Matches Comp 10 or 11.
+            kvlObjects.corners = [];
+            // Re-create corners as objects we can animate
+             corners.forEach((pos, idx) => {
+                const mesh = new THREE.Mesh(cornerGeo, matPastelBlue);
+                mesh.position.copy(pos);
+                groups.kvl.add(mesh);
+                kvlObjects.corners.push({ mesh: mesh, idx: idx });
+            });
+            
+            // Ground plane grid for KVL context
+            const gridHelper = new THREE.GridHelper(40, 40, 0x1e293b, 0x0f172a);
+            gridHelper.position.y = -2;
+            groups.kvl.add(gridHelper);
+        }
+
+        // --- 6. ANIMATION LOOP ---
+        initKCL();
+        initKVL();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+
+            // KCL Animation
+            if(state.mode === 'kcl') {
+                kclObjects.particles.forEach(p => {
+                    // Get current value for this arm
+                    let currentVal = state.kcl[p.armId];
+                    if(currentVal === undefined) currentVal = 0;
+                    
+                    // Move
+                    const speed = p.speedBase * currentVal * 0.5; // Scale speed
+                    
+                    if(p.armType === 'in') {
+                        // Move towards 0 (Progress 1 -> 0)
+                        p.progress -= speed;
+                        if(p.progress < 0) p.progress = 1;
+                    } else {
+                        // Move away (Progress 0 -> 1)
+                        p.progress += speed;
+                        if(p.progress > 1) p.progress = 0;
+                    }
+
+                    // Update Position: Center(0,0,0) + Dir * (Length * Progress)
+                    const dist = 10 * p.progress;
+                    p.mesh.position.copy(p.armDir).multiplyScalar(dist);
+                    
+                    // Visually hide if current is 0
+                    p.mesh.visible = currentVal > 0.1;
+                });
+            }
+            
+            // KVL Animation (Elevation Lerp)
+            if(state.mode === 'kvl') {
+                // Smoothly transition heights
+                const targetScaleY = state.kvl.elevationMode ? 0.5 : 0.0; // Scale potential to height
+                
+                const Vs = state.kvl.vs;
+                const drops = state.kvl.drops; // [V1, V2, V3, V4]
+                
+                // Calculate Potentials at key nodes
+                const H_0 = 0;
+                const H_Vs = Vs * targetScaleY;
+                const H_After_R1 = (Vs - drops[0]) * targetScaleY;
+                const H_After_R2 = (Vs - drops[0] - drops[1]) * targetScaleY;
+                const H_After_R3 = (Vs - drops[0] - drops[1] - drops[2]) * targetScaleY;
+                
+                // Map components to their potential height
+                // List: 0(W), 1(Src), 2(W) | 3(W), 4(R1), 5(W), 6(R2), 7(W) | 8(W), 9(R3), 10(W) | 11(W), 12(R4), 13(W)
+                
+                kvlObjects.components.forEach((comp, i) => {
+                    let targetY = 0;
+                    
+                    // Before Source (Comp 0, 1) -> 0 (Or keep source flat at 0)
+                    if (i <= 1) targetY = 0;
+                    // After Source / Top Wire / Before R1 (Comp 2, 3, 4) -> Vs
+                    else if (i <= 4) targetY = H_Vs;
+                    // Between R1 and R2 (Comp 5, 6) -> Vs - V1
+                    else if (i <= 6) targetY = H_After_R1;
+                    // Between R2 and R3 (Comp 7, 8, 9) -> Vs - V1 - V2
+                    else if (i <= 9) targetY = H_After_R2;
+                    // Between R3 and R4 (Comp 10, 11, 12) -> Vs - V1 - V2 - V3
+                    else if (i <= 12) targetY = H_After_R3;
+                    // After R4 (Comp 13) -> 0
+                    else targetY = 0;
+                    
+                    // Lerp Y
+                    comp.meshGroup.position.y += (targetY - comp.meshGroup.position.y) * 0.1;
+                });
+                
+                // Animate Corners
+                // C0(BL): 0. C1(TL): Vs. C2(TR): Vs-V1-V2. C3(BR): Vs-V1-V2-V3.
+                const cornerTargets = [
+                    0, // Bot Left
+                    H_Vs, // Top Left
+                    H_After_R2, // Top Right
+                    H_After_R3 // Bot Right
+                ];
+                
+                if(kvlObjects.corners) {
+                    kvlObjects.corners.forEach((c, idx) => {
+                       c.mesh.position.y += (cornerTargets[idx] - c.mesh.position.y) * 0.1; 
+                    });
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- 7. LOGIC & UI HANDLERS ---
+        
+        function switchMode(mode) {
+            state.mode = mode;
+            
+            // Toggle Visibility
+            groups.kcl.visible = mode === 'kcl';
+            groups.kvl.visible = mode === 'kvl';
+            
+            // Toggle UI Buttons
+            const btnKcl = document.getElementById('btn-kcl');
+            const btnKvl = document.getElementById('btn-kvl');
+            
+            if(mode === 'kcl') {
+                btnKcl.classList.add('text-cyan-400', 'border-cyan-400', 'shadow-[0_0_15px_rgba(34,211,238,0.3)]');
+                btnKcl.classList.remove('text-gray-400', 'border-gray-600');
+                btnKvl.classList.remove('text-green-400', 'border-green-400', 'shadow-[0_0_15px_rgba(74,222,128,0.3)]');
+                btnKvl.classList.add('text-gray-400', 'border-gray-600');
+                
+                document.getElementById('controls-kcl').classList.remove('hidden');
+                document.getElementById('controls-kvl').classList.add('hidden');
+                document.getElementById('info-kcl').classList.remove('hidden');
+                document.getElementById('info-kvl').classList.add('hidden');
+            } else {
+                btnKvl.classList.add('text-green-400', 'border-green-400', 'shadow-[0_0_15px_rgba(74,222,128,0.3)]');
+                btnKvl.classList.remove('text-gray-400', 'border-gray-600');
+                btnKcl.classList.remove('text-cyan-400', 'border-cyan-400', 'shadow-[0_0_15px_rgba(34,211,238,0.3)]');
+                btnKcl.classList.add('text-gray-400', 'border-gray-600');
+                
+                document.getElementById('controls-kvl').classList.remove('hidden');
+                document.getElementById('controls-kcl').classList.add('hidden');
+                document.getElementById('info-kvl').classList.remove('hidden');
+                document.getElementById('info-kcl').classList.add('hidden');
+            }
+        }
+
+        function updateKCL() {
+            // Get inputs
+            const i1 = parseFloat(document.getElementById('slider-i1').value);
+            const i5 = parseFloat(document.getElementById('slider-i5').value);
+            
+            state.kcl.i1 = i1;
+            state.kcl.i5 = i5;
+            
+            document.getElementById('val-i1').innerText = i1.toFixed(1);
+            document.getElementById('val-i5').innerText = i5.toFixed(1);
+
+            // Calculate Total In
+            const totalIn = i1 + i5;
+            document.getElementById('kcl-total').innerText = totalIn.toFixed(1) + " A";
+            
+            // Distribute to Out (based on fixed ratios 1:1:1 for simplicity)
+            const totalRatio = 3; 
+            const i2 = totalIn / totalRatio;
+            const i3 = totalIn / totalRatio;
+            const i4 = totalIn / totalRatio;
+            
+            state.kcl.i2 = i2;
+            state.kcl.i3 = i3;
+            state.kcl.i4 = i4;
+            
+            // Update UI bars and values
+            const maxVal = 20; // For bar width scaling
+            document.getElementById('val-i2').innerText = i2.toFixed(1);
+            document.getElementById('val-i3').innerText = i3.toFixed(1);
+            document.getElementById('val-i4').innerText = i4.toFixed(1);
+            
+            document.getElementById('bar-i2').style.width = Math.min((i2/maxVal)*100, 100) + '%';
+            document.getElementById('bar-i3').style.width = Math.min((i3/maxVal)*100, 100) + '%';
+            document.getElementById('bar-i4').style.width = Math.min((i4/maxVal)*100, 100) + '%';
+        }
+
+        function updateKVL() {
+            // Get inputs
+            const Vs = parseFloat(document.getElementById('slider-vs').value);
+            const R1 = parseFloat(document.getElementById('slider-r1').value);
+            const R2 = parseFloat(document.getElementById('slider-r2').value);
+            const R3 = parseFloat(document.getElementById('slider-r3').value);
+            const R4 = parseFloat(document.getElementById('slider-r4').value);
+            
+            state.kvl.vs = Vs;
+            state.kvl.r = [R1, R2, R3, R4];
+            
+            // Update UI Labels
+            document.getElementById('val-vs').innerText = Vs;
+            document.getElementById('val-r1').innerText = R1;
+            document.getElementById('val-r2').innerText = R2;
+            document.getElementById('val-r3').innerText = R3;
+            document.getElementById('val-r4').innerText = R4;
+            
+            // Calculate Circuit
+            const R_total = R1 + R2 + R3 + R4;
+            const I = Vs / R_total;
+            state.kvl.i = I;
+            
+            const drops = [I*R1, I*R2, I*R3, I*R4];
+            state.kvl.drops = drops;
+            
+            document.getElementById('kvl-current').innerText = I.toFixed(2) + " A";
+            
+            // Update 3D Text Labels
+            let resIdx = 0;
+            kvlObjects.components.forEach(comp => {
+                if(comp.type === 'resistor') {
+                    const drop = drops[resIdx];
+                    // Update canvas texture
+                    const mat = comp.vLabelSprite.material;
+                    mat.map = createTextTexture(drop.toFixed(1) + 'V', '#ffffff');
+                    resIdx++;
+                }
+            });
+        }
+        
+        function toggleElevation() {
+            state.kvl.elevationMode = document.getElementById('check-elevation').checked;
+        }
+
+        // Initialize
+        updateKCL();
+        updateKVL();
+        animate();
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+    </script>
+</body>
+</html>
