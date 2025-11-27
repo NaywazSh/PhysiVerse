@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nuclear Fission vs. Fusion 3D Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d0d1a; /* Dark background */
+            color: #e0e0ff;
+            overflow: hidden;
+            touch-action: none; /* Prevent scrolling/zooming issues on touch */
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            padding: 1rem;
+        }
+        #canvas-container {
+            width: 100%;
+            max-width: 1200px;
+            height: 60vh;
+            min-height: 300px;
+            border: 2px solid #4a00e0;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 0 40px rgba(74, 0, 224, 0.5);
+            background-color: #00001a;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .controls {
+            margin-top: 2rem;
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .btn {
+            background-image: linear-gradient(45deg, #7900ff, #4a00e0);
+            color: white;
+            padding: 0.75rem 2rem;
+            border-radius: 9999px;
+            font-weight: bold;
+            box-shadow: 0 4px 15px rgba(74, 0, 224, 0.4);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: none;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(74, 0, 224, 0.6);
+        }
+        .btn:disabled {
+            background-image: linear-gradient(45deg, #333, #111);
+            color: #888;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        .reaction-label {
+            position: absolute;
+            top: 0.5rem;
+            font-size: 1.5rem;
+            font-weight: 700;
+            text-shadow: 0 0 5px #fff;
+        }
+        .fission-label { left: 5%; color: #ff0077; }
+        .fusion-label { right: 5%; color: #00ffff; }
+        .info-box {
+            position: absolute;
+            bottom: 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: #fff;
+            text-align: center;
+        }
+        .fission-info { left: 5%; border: 1px solid #ff0077; }
+        .fusion-info { right: 5%; border: 1px solid #00ffff; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1 class="text-3xl sm:text-4xl font-extrabold mb-4 text-center">Nuclear Fission vs. Fusion</h1>
+        <p class="text-sm text-center mb-6 text-gray-400 max-w-xl">A side-by-side, interactive 3D demonstration of the two fundamental nuclear processes.</p>
+
+        <div id="canvas-container" class="relative">
+            <canvas id="nuclear-canvas"></canvas>
+            <!-- Labels -->
+            <div class="reaction-label fission-label">FISSION (U-235)</div>
+            <div class="reaction-label fusion-label">FUSION (D + T)</div>
+            <!-- Info Boxes -->
+            <div class="info-box fission-info" id="fission-info">Ready to fire neutron.</div>
+            <div class="info-box fusion-info" id="fusion-info">Ready to accelerate.</div>
+        </div>
+
+        <div class="controls">
+            <button id="fission-btn" class="btn">Start Fission</button>
+            <button id="fusion-btn" class="btn">Start Fusion</button>
+            <button id="reset-btn" class="btn bg-gray-600 hover:bg-gray-700">Reset</button>
+        </div>
+    </div>
+
+    <script>
+        // Global variables for Firebase access (required by the environment)
+        // These are not used for this local simulation, but kept for context.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let canvas, renderer, cameraFission, cameraFusion, sceneFission, sceneFusion;
+        let fissionBtn, fusionBtn, resetBtn;
+        let fissionInfo, fusionInfo;
+
+        // Particle definitions
+        const PARTICLE = {
+            NEUTRON: { color: 0xcccccc, radius: 0.2, name: 'Neutron' },
+            U235: { color: 0xff0077, radius: 2.5, name: 'Uranium-235' },
+            FISSION_PRODUCT: { color: 0x00ff00, radius: 1.5, name: 'Fission Fragment' },
+            DEUTERIUM: { color: 0x00ffff, radius: 1.0, name: 'Deuterium' },
+            TRITIUM: { color: 0x0099ff, radius: 1.2, name: 'Tritium' },
+            HELIUM: { color: 0xff8800, radius: 1.8, name: 'Helium' }
+        };
+
+        // State variables for the simulation
+        let isAnimating = false;
+        let simulationState = {
+            fission: 'ready', // ready, initiating, splitting, finished
+            fusion: 'ready',  // ready, accelerating, fusing, finished
+        };
+
+        // THREE.js objects
+        let fissionObjects = {};
+        let fusionObjects = {};
+
+        // Animation timing
+        const FISSION_TIME = 1500; // Total time for fission sequence in ms
+        const FUSION_TIME = 2000; // Total time for fusion sequence in ms
+
+        // Utility function for creating glowing spheres
+        function createParticle(def, position) {
+            const geometry = new THREE.SphereGeometry(def.radius, 16, 16);
+            const material = new THREE.MeshPhongMaterial({
+                color: def.color,
+                emissive: def.color,
+                emissiveIntensity: 0.5,
+                shininess: 100,
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(position.x, position.y, position.z);
+            mesh.userData = { definition: def };
+            return mesh;
+        }
+
+        // --- FISSION LOGIC (Left Side) ---
+
+        function setupFissionScene() {
+            sceneFission = new THREE.Scene();
+            sceneFission.background = new THREE.Color(0x00000a);
+
+            // Light
+            const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+            sceneFission.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(5, 5, 5);
+            sceneFission.add(directionalLight);
+
+            // U-235 Target
+            const u235 = createParticle(PARTICLE.U235, { x: 0, y: 0, z: 0 });
+            sceneFission.add(u235);
+            fissionObjects.u235 = u235;
+
+            // Incoming Neutron
+            const neutron = createParticle(PARTICLE.NEUTRON, { x: -10, y: 0, z: 0 });
+            sceneFission.add(neutron);
+            fissionObjects.incomingNeutron = neutron;
+
+            // Initial state for animation
+            fissionObjects.fragments = [];
+            fissionObjects.releasedNeutrons = [];
+            fissionObjects.flash = null;
+        }
+
+        function animateFission() {
+            if (simulationState.fission !== 'ready' || isAnimating) return;
+            isAnimating = true;
+            simulationState.fission = 'initiating';
+            fissionBtn.disabled = true;
+            fusionBtn.disabled = true;
+            fissionInfo.textContent = "Neutron approaching U-235...";
+
+            const neutron = fissionObjects.incomingNeutron;
+            const u235 = fissionObjects.u235;
+
+            // 1. Neutron travel time (0ms to 500ms)
+            const travelDuration = 500;
+            let startTime = performance.now();
+            
+            function travelLoop(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(1, elapsed / travelDuration);
+
+                // Move neutron towards the center of U-235
+                const targetX = u235.position.x;
+                neutron.position.x = -10 + (targetX + 10) * progress;
+
+                if (progress < 1) {
+                    requestAnimationFrame(travelLoop);
+                } else {
+                    // 2. Splitting event (500ms)
+                    neutron.visible = false;
+                    u235.visible = false;
+                    fissionInfo.textContent = "U-235 splits! Energy released...";
+
+                    // ENERGY FLASH
+                    const flashGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+                    const flashMaterial = new THREE.MeshBasicMaterial({ color: 0xffa500, transparent: true, opacity: 1.0 });
+                    const flash = new THREE.Mesh(flashGeometry, flashMaterial);
+                    flash.position.copy(u235.position);
+                    sceneFission.add(flash);
+                    fissionObjects.flash = flash;
+
+                    // FISSION PRODUCTS (Fragments)
+                    const fragment1 = createParticle(PARTICLE.FISSION_PRODUCT, u235.position);
+                    const fragment2 = createParticle(PARTICLE.FISSION_PRODUCT, u235.position);
+                    sceneFission.add(fragment1);
+                    sceneFission.add(fragment2);
+                    fissionObjects.fragments.push(fragment1, fragment2);
+
+                    // RELEASED NEUTRONS (3)
+                    for (let i = 0; i < 3; i++) {
+                        const releasedNeutron = createParticle(PARTICLE.NEUTRON, u235.position);
+                        sceneFission.add(releasedNeutron);
+                        fissionObjects.releasedNeutrons.push(releasedNeutron);
+                    }
+
+                    // Start dissipation
+                    startTime = performance.now();
+                    simulationState.fission = 'splitting';
+                    requestAnimationFrame(dissipationLoop);
+                }
+            }
+
+            function dissipationLoop(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(1, elapsed / (FISSION_TIME - travelDuration));
+
+                // Flash effect fade and grow
+                if (fissionObjects.flash) {
+                    fissionObjects.flash.scale.setScalar(1 + progress * 50);
+                    fissionObjects.flash.material.opacity = 1.0 - progress;
+                    if (progress >= 1) {
+                        sceneFission.remove(fissionObjects.flash);
+                        fissionObjects.flash = null;
+                    }
+                }
+
+                // Move fragments and released neutrons outwards
+                const speed = 15;
+                fissionObjects.fragments.forEach((mesh, index) => {
+                    // Move outwards along pre-defined directions
+                    const direction = new THREE.Vector3(index === 0 ? 1 : -1, Math.sin(index) * 0.5, Math.cos(index) * 0.5).normalize();
+                    mesh.position.add(direction.multiplyScalar(speed * (elapsed / 1000)));
+                });
+
+                fissionObjects.releasedNeutrons.forEach((mesh, index) => {
+                    const angle = index * (Math.PI / 1.5) + Math.PI / 4;
+                    const direction = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0).normalize();
+                    mesh.position.add(direction.multiplyScalar(speed * 0.5 * (elapsed / 1000)));
+                });
+
+
+                if (progress < 1) {
+                    requestAnimationFrame(dissipationLoop);
+                } else {
+                    fissionInfo.textContent = "Chain reaction initiated! Products fly away.";
+                    simulationState.fission = 'finished';
+                    isAnimating = false;
+                    fissionBtn.disabled = false;
+                    fusionBtn.disabled = false;
+                }
+            }
+
+            requestAnimationFrame(travelLoop);
+        }
+
+        // --- FUSION LOGIC (Right Side) ---
+
+        function setupFusionScene() {
+            sceneFusion = new THREE.Scene();
+            sceneFusion.background = new THREE.Color(0x00000a);
+
+            // Light
+            const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+            sceneFusion.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(-5, 5, 5);
+            sceneFusion.add(directionalLight);
+
+            // Deuterium
+            const deuterium = createParticle(PARTICLE.DEUTERIUM, { x: -5, y: 0, z: 0 });
+            sceneFusion.add(deuterium);
+            fusionObjects.deuterium = deuterium;
+
+            // Tritium
+            const tritium = createParticle(PARTICLE.TRITIUM, { x: 5, y: 0, z: 0 });
+            sceneFusion.add(tritium);
+            fusionObjects.tritium = tritium;
+
+            // Initial state for animation
+            fusionObjects.product = null;
+            fusionObjects.releasedNeutron = null;
+            fusionObjects.flash = null;
+        }
+
+        function animateFusion() {
+            if (simulationState.fusion !== 'ready' || isAnimating) return;
+            isAnimating = true;
+            simulationState.fusion = 'accelerating';
+            fissionBtn.disabled = true;
+            fusionBtn.disabled = true;
+            fusionInfo.textContent = "Deuterium and Tritium accelerating...";
+
+            const D = fusionObjects.deuterium;
+            const T = fusionObjects.tritium;
+
+            const accelerateDuration = 1000;
+            let startTime = performance.now();
+
+            function accelerationLoop(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(1, elapsed / accelerateDuration);
+                const inverseProgress = 1 - progress;
+
+                // Simple exponential acceleration towards origin
+                D.position.x = -5 * inverseProgress * inverseProgress;
+                T.position.x = 5 * inverseProgress * inverseProgress;
+
+                if (progress < 1) {
+                    requestAnimationFrame(accelerationLoop);
+                } else {
+                    // 2. Fusion event (1000ms)
+                    D.visible = false;
+                    T.visible = false;
+                    fusionInfo.textContent = "Fusion reaction! Helium formed, energy released.";
+
+                    // ENERGY FLASH
+                    const flashGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+                    const flashMaterial = new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 1.0 });
+                    const flash = new THREE.Mesh(flashGeometry, flashMaterial);
+                    flash.position.set(0, 0, 0);
+                    sceneFusion.add(flash);
+                    fusionObjects.flash = flash;
+
+                    // HELIUM PRODUCT
+                    const helium = createParticle(PARTICLE.HELIUM, { x: 0, y: 0, z: 0 });
+                    sceneFusion.add(helium);
+                    fusionObjects.product = helium;
+
+                    // RELEASED NEUTRON
+                    const releasedNeutron = createParticle(PARTICLE.NEUTRON, { x: 0, y: 0, z: 0 });
+                    sceneFusion.add(releasedNeutron);
+                    fusionObjects.releasedNeutron = releasedNeutron;
+
+                    // Start dissipation
+                    startTime = performance.now();
+                    simulationState.fusion = 'fusing';
+                    requestAnimationFrame(separationLoop);
+                }
+            }
+
+            function separationLoop(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(1, elapsed / (FUSION_TIME - accelerateDuration));
+
+                // Flash effect fade and grow
+                if (fusionObjects.flash) {
+                    fusionObjects.flash.scale.setScalar(1 + progress * 50);
+                    fusionObjects.flash.material.opacity = 1.0 - progress;
+                    if (progress >= 1) {
+                        sceneFusion.remove(fusionObjects.flash);
+                        fusionObjects.flash = null;
+                    }
+                }
+
+                // Move product and released neutron outwards
+                const speed = 10;
+                const neutronDirection = new THREE.Vector3(0, 1, 0).normalize();
+                const heliumDirection = new THREE.Vector3(0, -1, 0).normalize();
+
+                fusionObjects.releasedNeutron.position.add(neutronDirection.multiplyScalar(speed * (elapsed / 1000)));
+                fusionObjects.product.position.add(heliumDirection.multiplyScalar(speed * 0.5 * (elapsed / 1000)));
+
+                if (progress < 1) {
+                    requestAnimationFrame(separationLoop);
+                } else {
+                    fusionInfo.textContent = "Energy released! Products separate.";
+                    simulationState.fusion = 'finished';
+                    isAnimating = false;
+                    fissionBtn.disabled = false;
+                    fusionBtn.disabled = false;
+                }
+            }
+
+            requestAnimationFrame(accelerationLoop);
+        }
+
+        // --- SETUP, RESET, AND RENDER ---
+
+        function init() {
+            canvas = document.getElementById('nuclear-canvas');
+            fissionBtn = document.getElementById('fission-btn');
+            fusionBtn = document.getElementById('fusion-btn');
+            resetBtn = document.getElementById('reset-btn');
+            fissionInfo = document.getElementById('fission-info');
+            fusionInfo = document.getElementById('fusion-info');
+
+            // Renderer setup
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.autoClear = false; // Important for multi-viewport rendering
+
+            // Cameras (Use Orthographic for a clearer scientific view)
+            const aspect = window.innerWidth / window.innerHeight;
+            const orthoSize = 10;
+            cameraFission = new THREE.OrthographicCamera(
+                -orthoSize * aspect, orthoSize * aspect, orthoSize, -orthoSize, 0.1, 100
+            );
+            cameraFission.position.set(0, 0, 10);
+            cameraFission.lookAt(0, 0, 0);
+
+            cameraFusion = cameraFission.clone(); // Same settings for the fusion side
+
+            // Scene setup
+            setupFissionScene();
+            setupFusionScene();
+
+            // Event listeners
+            fissionBtn.addEventListener('click', animateFission);
+            fusionBtn.addEventListener('click', animateFusion);
+            resetBtn.addEventListener('click', resetSimulation);
+            window.addEventListener('resize', onWindowResize, false);
+
+            onWindowResize();
+            animate();
+        }
+
+        function resetSimulation() {
+            // Remove all dynamic objects from Fission scene
+            fissionObjects.fragments.forEach(mesh => sceneFission.remove(mesh));
+            fissionObjects.releasedNeutrons.forEach(mesh => sceneFission.remove(mesh));
+            if (fissionObjects.flash) sceneFission.remove(fissionObjects.flash);
+
+            // Remove all dynamic objects from Fusion scene
+            if (fusionObjects.product) sceneFusion.remove(fusionObjects.product);
+            if (fusionObjects.releasedNeutron) sceneFusion.remove(fusionObjects.releasedNeutron);
+            if (fusionObjects.flash) sceneFusion.remove(fusionObjects.flash);
+
+            // Re-setup scenes to initial state
+            setupFissionScene();
+            setupFusionScene();
+
+            // Reset state
+            simulationState.fission = 'ready';
+            simulationState.fusion = 'ready';
+            isAnimating = false;
+            fissionBtn.disabled = false;
+            fusionBtn.disabled = false;
+            fissionInfo.textContent = "Ready to fire neutron.";
+            fusionInfo.textContent = "Ready to accelerate.";
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            renderer.setSize(width, height);
+            
+            // Adjust orthographic camera based on container aspect ratio
+            const aspect = width / (height * 2); // Divide by 2 because we split the screen
+            const orthoSize = 10;
+
+            cameraFission.left = -orthoSize * aspect;
+            cameraFission.right = orthoSize * aspect;
+            cameraFission.top = orthoSize;
+            cameraFission.bottom = -orthoSize;
+            cameraFission.updateProjectionMatrix();
+
+            cameraFusion.left = -orthoSize * aspect;
+            cameraFusion.right = orthoSize * aspect;
+            cameraFusion.top = orthoSize;
+            cameraFusion.bottom = -orthoSize;
+            cameraFusion.updateProjectionMatrix();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            render();
+        }
+
+        function render() {
+            renderer.clear();
+            const width = renderer.domElement.width;
+            const height = renderer.domElement.height;
+            const halfWidth = width / 2;
+
+            // --- RENDER FISSION SCENE (Left Half) ---
+            renderer.setViewport(0, 0, halfWidth, height);
+            renderer.setScissor(0, 0, halfWidth, height);
+            renderer.setScissorTest(true);
+            renderer.render(sceneFission, cameraFission);
+
+            // Add a dividing line (optional, but helps visualization)
+            // Note: This is complex with setScissor. Simpler approach: draw a thin rectangle using HTML/CSS overlay or 3D geometry in both scenes.
+            // For simplicity, we'll rely on the viewport split and the border.
+
+            // --- RENDER FUSION SCENE (Right Half) ---
+            renderer.setViewport(halfWidth, 0, halfWidth, height);
+            renderer.setScissor(halfWidth, 0, halfWidth, height);
+            renderer.setScissorTest(true);
+            renderer.render(sceneFusion, cameraFusion);
+
+            renderer.setScissorTest(false); // Reset scissor test
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
