@@ -1,0 +1,9 @@
+/PhysiVerse
+│
+├── index.html        (The main homepage)
+├── style.css         (Custom styling for the cool looks)
+├── main.js           (Logic to load cards)
+├── data.js           (List of your simulations)
+│
+└── /sims             (Folder for 3D content)
+    └── gravity.html  (An example 3D simulation file)

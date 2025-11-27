@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Gravity Simulation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style> body { margin: 0; overflow: hidden; background: #000; } </style>
+</head>
+<body>
+
+    <!-- Overlay UI -->
+    <div class="absolute top-4 left-4 z-10 flex gap-4">
+        <a href="../index.html" class="bg-gray-800 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition">
+            &larr; Back to Dashboard
+        </a>
+        <div class="bg-black/50 text-white px-4 py-2 rounded-lg backdrop-blur-md border border-white/10">
+            <h1 class="font-bold">Gravity Demo</h1>
+            <p class="text-xs text-gray-300">Drag to rotate, Scroll to zoom</p>
+        </div>
+    </div>
+
+    <!-- 3D Library -->
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+        import { OrbitControls } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/controls/OrbitControls.js';
+
+        // 1. Setup Scene
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0f172a); // Matches website theme
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // 2. Add Objects (Sun and Earth)
+        const geometrySun = new THREE.SphereGeometry(2, 32, 32);
+        const materialSun = new THREE.MeshBasicMaterial({ color: 0xffcc00 }); // Glowing Sun
+        const sun = new THREE.Mesh(geometrySun, materialSun);
+        scene.add(sun);
+
+        const geometryEarth = new THREE.SphereGeometry(0.5, 32, 32);
+        const materialEarth = new THREE.MeshStandardMaterial({ color: 0x00aaff });
+        const earth = new THREE.Mesh(geometryEarth, materialEarth);
+        earth.position.x = 5;
+        scene.add(earth);
+
+        // 3. Lighting
+        const pointLight = new THREE.PointLight(0xffffff, 2, 100);
+        scene.add(pointLight);
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+
+        // 4. Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        camera.position.z = 10;
+
+        // 5. Animation Loop
+        let time = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            time += 0.01;
+            // Orbit logic
+            earth.position.x = Math.cos(time) * 5;
+            earth.position.z = Math.sin(time) * 5;
+            earth.rotation.y += 0.02;
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
