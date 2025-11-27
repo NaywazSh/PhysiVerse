@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Projectile Motion Simulator</title>
+    <!-- Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Three.js for 3D visualization -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Load OrbitControls for camera interaction -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        /* Custom styles for the interactive elements */
+        :root {
+            --primary-color: #3b82f6; /* Tailwind blue-500 */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars from popping up */
+            background-color: #1f2937; /* Dark background */
+        }
+        #app-container {
+            display: flex;
+            height: 100vh;
+        }
+        #controls {
+            width: 300px;
+            padding: 20px;
+            background-color: #111827; /* Darker sidebar */
+            color: #f3f4f6;
+            overflow-y: auto;
+            border-right: 1px solid #374151;
+        }
+        #simulation-container {
+            flex-grow: 1;
+            position: relative;
+        }
+        canvas {
+            display: block;
+        }
+        .control-group {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            background-color: #1f2937;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #9ca3af;
+            font-size: 0.9rem;
+        }
+        input[type="range"] {
+            width: 100%;
+            height: 4px;
+            -webkit-appearance: none;
+            background: #4b5563;
+            border-radius: 2px;
+            margin-top: 5px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            background: var(--primary-color);
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        .output-value {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #d1d5db;
+        }
+        .output-label {
+            font-size: 0.8rem;
+            color: #6b7280;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+        <!-- Controls Sidebar -->
+        <div id="controls">
+            <h1 class="text-2xl font-bold mb-6 text-white border-b border-blue-600 pb-2">Projectile Simulator</h1>
+
+            <!-- Initial Velocity Control -->
+            <div class="control-group">
+                <label for="velocity">Initial Velocity (v₀): <span class="output-value" id="velocity-output">50</span> m/s</label>
+                <input type="range" id="velocity" min="10" max="100" value="50" step="1">
+            </div>
+
+            <!-- Launch Angle Control -->
+            <div class="control-group">
+                <label for="angle">Launch Angle (θ): <span class="output-value" id="angle-output">45</span> degrees</label>
+                <input type="range" id="angle" min="1" max="89" value="45" step="1">
+            </div>
+
+            <!-- Gravity Control -->
+            <div class="control-group">
+                <label for="gravity">Gravity (g): <span class="output-value" id="gravity-output">9.81</span> m/s²</label>
+                <input type="range" id="gravity" min="1" max="30" value="9.81" step="0.01">
+            </div>
+
+            <h2 class="text-xl font-semibold mt-8 mb-4 text-blue-400">Calculated Results</h2>
+
+            <!-- Results Display -->
+            <div class="grid grid-cols-2 gap-4">
+                <div class="text-center p-3 bg-gray-800 rounded-lg">
+                    <div class="output-value" id="range-result">0.00</div>
+                    <div class="output-label">Range (R) [m]</div>
+                </div>
+                <div class="text-center p-3 bg-gray-800 rounded-lg">
+                    <div class="output-value" id="max-height-result">0.00</div>
+                    <div class="output-label">Max Height (H) [m]</div>
+                </div>
+                <div class="text-center col-span-2 p-3 bg-gray-800 rounded-lg">
+                    <div class="output-value" id="time-result">0.00</div>
+                    <div class="output-label">Time of Flight (T) [s]</div>
+                </div>
+            </div>
+
+            <div class="mt-6 p-4 text-xs text-gray-400 border-t border-gray-700">
+                <p>Use your mouse to zoom, pan, and rotate the 3D scene.</p>
+                <p>The blue line represents the parabolic path of the projectile.</p>
+            </div>
+        </div>
+
+        <!-- 3D Simulation Container -->
+        <div id="simulation-container">
+            <!-- Canvas will be appended here -->
+        </div>
+    </div>
+
+    <script type="module">
+        // --- Global Variables and Initialization ---
+        const container = document.getElementById('simulation-container');
+        let scene, camera, renderer, controls;
+        let projectilePath;
+        let animationFrameId;
+        
+        // Offset to move the launch point to the left for better visibility.
+        const LAUNCH_OFFSET_X = -60;
+
+        // Configuration object for physics parameters
+        const params = {
+            velocity: 50, // m/s
+            angle: 45,    // degrees
+            gravity: 9.81 // m/s²
+        };
+
+        // DOM elements for output
+        const outputElements = {
+            velocity: document.getElementById('velocity-output'),
+            angle: document.getElementById('angle-output'),
+            gravity: document.getElementById('gravity-output'),
+            range: document.getElementById('range-result'),
+            maxHeight: document.getElementById('max-height-result'),
+            time: document.getElementById('time-result')
+        };
+
+        // --- Core Physics Calculations ---
+
+        /**
+         * Calculates the trajectory of the projectile over time.
+         * @param {number} t Time elapsed (seconds)
+         * @param {object} p Physics parameters (v0, angle, g)
+         * @returns {object} {x, y, z} position
+         */
+        function calculatePosition(t, p) {
+            const angleRad = p.angle * (Math.PI / 180);
+            const v0x = p.velocity * Math.cos(angleRad);
+            const v0y = p.velocity * Math.sin(angleRad);
+
+            // Projectile Motion Equations (assuming launch from (0,0,0) in x-y plane)
+            // X: Horizontal position (constant velocity) - MODIFIED to include offset
+            const x = LAUNCH_OFFSET_X + v0x * t; 
+            // Y: Vertical position (affected by gravity)
+            const y = v0y * t - 0.5 * p.gravity * t * t;
+            // Z: Set to 0 for a 2D projection in the X-Y plane
+            const z = 0;
+
+            return { x, y, z };
+        }
+
+        /**
+         * Calculates key metrics for the trajectory.
+         * @param {object} p Physics parameters (v0, angle, g)
+         */
+        function calculateMetrics(p) {
+            const angleRad = p.angle * (Math.PI / 180);
+
+            // 1. Time of Flight (T): Time until y=0 (excluding t=0)
+            const T = (2 * p.velocity * Math.sin(angleRad)) / p.gravity;
+            // 2. Maximum Range (R): Horizontal distance traveled at T
+            const R = (p.velocity * p.velocity * Math.sin(2 * angleRad)) / p.gravity;
+            // 3. Maximum Height (H): Maximum vertical displacement (occurs at T/2)
+            const H = (p.velocity * p.velocity * Math.sin(angleRad) * Math.sin(angleRad)) / (2 * p.gravity);
+
+            return { T, R, H };
+        }
+
+        // --- Three.js Setup and Rendering ---
+
+        function init() {
+            // Scene setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111827); // Very dark blue/grey
+
+            // Camera setup
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            // Adjust camera to look slightly more towards the center of the expected trajectory path
+            camera.position.set(0, 40, 100); 
+
+            // Renderer setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+
+            // Orbit Controls (Zoomable and Rotatable)
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; // smooth rotation
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 10;
+            controls.maxDistance = 300;
+            controls.maxPolarAngle = Math.PI / 2; // Prevent camera going below ground
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 5); // soft white light
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            directionalLight.position.set(1, 1, 1).normalize();
+            scene.add(directionalLight);
+
+            // Create Ground Plane (X-Z plane is the ground in 3D, but we use X-Y for physics)
+            // Let's create an X-Y grid floor for better visualization of the 2D parabola
+            const floorSize = 150;
+            const gridHelper = new THREE.GridHelper(floorSize, 15, 0x444444, 0x444444);
+            // Rotate grid to lie on the X-Z plane (standard 3D ground)
+            gridHelper.rotation.x = Math.PI / 2;
+            scene.add(gridHelper);
+
+            // Create initial path object (Line)
+            const material = new THREE.LineBasicMaterial({ color: 0x3b82f6, linewidth: 3 });
+            const geometry = new THREE.BufferGeometry();
+            projectilePath = new THREE.Line(geometry, material);
+            scene.add(projectilePath);
+
+            // Create projectile sphere
+            const sphereGeometry = new THREE.SphereGeometry(2, 32, 32);
+            const sphereMaterial = new THREE.MeshPhongMaterial({ color: 0xef4444 });
+            const projectile = new THREE.Mesh(sphereGeometry, sphereMaterial);
+            projectile.name = 'projectile';
+            scene.add(projectile);
+
+            // --- Custom Axis Lines (Replaces AxesHelper for custom color) ---
+            const axisLength = floorSize / 4; 
+            const originPosition = new THREE.Vector3(LAUNCH_OFFSET_X, 0, 0);
+
+            // X-Axis (Red)
+            const xAxisMaterial = new THREE.LineBasicMaterial({ color: 0xff0000 });
+            const xAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+                originPosition,
+                new THREE.Vector3(LAUNCH_OFFSET_X + axisLength, 0, 0)
+            ]);
+            scene.add(new THREE.Line(xAxisGeometry, xAxisMaterial));
+
+            // Y-Axis (Green)
+            const yAxisMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00 });
+            const yAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+                originPosition,
+                new THREE.Vector3(LAUNCH_OFFSET_X, axisLength, 0)
+            ]);
+            scene.add(new THREE.Line(yAxisGeometry, yAxisMaterial));
+
+            // Z-Axis (Yellow) - USER REQUEST
+            const zAxisMaterial = new THREE.LineBasicMaterial({ color: 0xffff00 }); 
+            const zAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+                originPosition,
+                new THREE.Vector3(LAUNCH_OFFSET_X, 0, axisLength)
+            ]);
+            scene.add(new THREE.Line(zAxisGeometry, zAxisMaterial));
+            // -----------------------------------------------------------------
+
+            // Initial draw
+            updateSimulation();
+
+            // Set up resize listener
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            controls.update();
+        }
+
+        function updateSimulation() {
+            // 1. Calculate trajectory metrics
+            const metrics = calculateMetrics(params);
+            const T = metrics.T;
+
+            // 2. Update Path Geometry
+            const points = [];
+            const step = T / 100; // 100 segments for a smooth curve
+
+            // Only draw if time of flight is positive
+            if (T > 0) {
+                for (let t = 0; t <= T + step; t += step) {
+                    const t_clamped = Math.min(t, T); // Clamp time to prevent drawing past landing
+                    const pos = calculatePosition(t_clamped, params);
+                    // The path is defined by X and Y coordinates. Z is 0.
+                    points.push(new THREE.Vector3(pos.x, pos.y, pos.z));
+                }
+            } else {
+                 // At T=0, just draw the starting point (LAUNCH_OFFSET_X, 0, 0)
+                points.push(new THREE.Vector3(LAUNCH_OFFSET_X, 0, 0));
+            }
+
+            projectilePath.geometry.dispose(); // Dispose old geometry
+            projectilePath.geometry = new THREE.BufferGeometry().setFromPoints(points);
+
+            // 3. Update Projectile Sphere Position (for initial visualization)
+            const projectileSphere = scene.getObjectByName('projectile');
+            if (projectileSphere) {
+                // Set the sphere to the peak of the trajectory (t = T/2)
+                const peakTime = T / 2;
+                const peakPos = calculatePosition(peakTime, params);
+                projectileSphere.position.set(peakPos.x, peakPos.y, peakPos.z);
+            }
+
+            // 4. Update UI Results
+            outputElements.range.textContent = metrics.R.toFixed(2);
+            outputElements.maxHeight.textContent = metrics.H.toFixed(2);
+            outputElements.time.textContent = metrics.T.toFixed(2);
+        }
+
+        function animate() {
+            animationFrameId = requestAnimationFrame(animate);
+
+            // Required for damping to work (smooth rotation)
+            controls.update();
+
+            renderer.render(scene, camera);
+        }
+
+        // --- Event Listeners and Control Logic ---
+
+        function setupControls() {
+            document.getElementById('velocity').addEventListener('input', (e) => {
+                params.velocity = parseFloat(e.target.value);
+                outputElements.velocity.textContent = e.target.value;
+                updateSimulation();
+            });
+
+            document.getElementById('angle').addEventListener('input', (e) => {
+                params.angle = parseFloat(e.target.value);
+                outputElements.angle.textContent = e.target.value;
+                updateSimulation();
+            });
+
+            document.getElementById('gravity').addEventListener('input', (e) => {
+                params.gravity = parseFloat(e.target.value);
+                outputElements.gravity.textContent = e.target.value;
+                updateSimulation();
+            });
+
+            // Initial UI update for default values
+            outputElements.velocity.textContent = params.velocity;
+            outputElements.angle.textContent = params.angle;
+            outputElements.gravity.textContent = params.gravity;
+        }
+
+        // --- Start Application ---
+        window.onload = function() {
+            try {
+                init();
+                setupControls();
+                animate();
+            } catch (error) {
+                console.error("An error occurred during simulation setup:", error);
+                document.getElementById('simulation-container').innerHTML = '<div class="text-white p-5">Error initializing 3D environment. Check console for details.</div>';
+            }
+        }
+    </script>
+</body>
+</html>
