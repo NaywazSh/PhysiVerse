@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Organ Pipe Sound Wave Simulation</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Load OrbitControls for camera interaction -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+        /* Custom scrollbar for better aesthetics */
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #1f2937; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 h-screen flex flex-col md:flex-row">
+
+    <!-- Control Panel -->
+    <div id="controls" class="bg-gray-800 p-4 w-full md:w-80 flex-shrink-0 shadow-2xl custom-scrollbar overflow-y-auto">
+        <h1 class="text-2xl font-bold mb-4 text-indigo-400">Organ Pipe Physics</h1>
+        <p class="text-sm mb-4">Explore the first three odd harmonics (standing waves) in a **closed-open pipe**.</p>
+        <div class="space-y-3">
+            
+            <div class="p-3 bg-gray-700 rounded-lg shadow-inner">
+                <label for="harmonicSelector" class="block text-sm font-medium mb-1">Select Harmonic (n):</label>
+                <select id="harmonicSelector" class="w-full p-2 rounded-md bg-gray-900 border border-gray-600 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+                    <option value="1">Fundamental (n=1)</option>
+                    <option value="3">Third Harmonic (n=3)</option>
+                    <option value="5">Fifth Harmonic (n=5)</option>
+                </select>
+            </div>
+
+            <div class="p-3 bg-gray-700 rounded-lg shadow-inner">
+                <h3 class="text-lg font-semibold mb-2 text-yellow-300">Wave Properties</h3>
+                <p class="text-sm">Length (L): <span id="lengthDisplay" class="font-mono">1.0 m</span></p>
+                <p class="text-sm">Wave Speed (v): <span id="speedDisplay" class="font-mono">343 m/s</span></p>
+                <p class="text-sm border-t border-gray-600 mt-2 pt-2">Mode (n): <span id="nDisplay" class="font-mono text-xl text-yellow-300">1</span></p>
+                <p class="text-sm">Wavelength (&lambda;): <span id="lambdaDisplay" class="font-mono">4.0 m</span></p>
+                <p class="text-sm">Frequency (f): <span id="frequencyDisplay" class="font-mono">85.75 Hz</span></p>
+            </div>
+
+            <div class="p-3 bg-gray-700 rounded-lg shadow-inner">
+                <h3 class="text-lg font-semibold mb-2 text-red-400">Node/Antinode Info</h3>
+                <p class="text-xs">
+                    <span class="text-red-400 font-bold">Node (N)</span>: Point of minimum displacement. (Zero movement)<br>
+                    <span class="text-green-400 font-bold">Antinode (A)</span>: Point of maximum displacement. (Max movement)
+                </p>
+                <div id="nodeAntinodeList" class="mt-2 text-xs space-y-1">
+                    <!-- Dynamic List Here -->
+                </div>
+            </div>
+
+        </div>
+
+        <div class="mt-6 text-xs text-gray-500 border-t border-gray-700 pt-4">
+            <p><strong>Pipe Model:</strong> Closed at $x=0$ (Node), Open at $x=L$ (Antinode).</p>
+            <p><strong>Equations:</strong> $\lambda_n = 4L/n$, $f_n = n \cdot v/(4L)$ where $n=1, 3, 5, \dots$</p>
+            <p><strong>Interaction:</strong> Drag mouse to rotate, scroll wheel to zoom.</p>
+        </div>
+    </div>
+
+    <!-- 3D Canvas Container -->
+    <div id="canvasContainer" class="flex-grow">
+        <!-- The Three.js canvas will be injected here -->
+    </div>
+
+    <script type="module">
+        // --- Configuration Constants ---
+        const PIPE_LENGTH = 10; // Length of the pipe in 3D units (e.g., 1 meter for calculation, but 10 units for visualization)
+        const WAVE_SPEED = 343; // Speed of sound in air (m/s)
+        const MAX_AMPLITUDE = 0.5;
+        const SEGMENTS = 200; // Resolution of the wave line
+
+        // --- Three.js Setup ---
+        const container = document.getElementById('canvasContainer');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setClearColor(0x0f172a); // Tailwind gray-900 equivalent
+        container.appendChild(renderer.domElement);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0x404040, 5); // soft white light
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
+        directionalLight.position.set(10, 10, 5);
+        scene.add(directionalLight);
+
+        // --- Controls ---
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        camera.position.set(5, 5, 12);
+        controls.update();
+
+        // --- Geometries and Materials ---
+        
+        // 1. Pipe (The Enclosure)
+        const pipeGeometry = new THREE.BoxGeometry(PIPE_LENGTH, 1.5, 1.5);
+        const pipeMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0x374151, // Gray-700
+            transparent: true, 
+            opacity: 0.2, 
+            side: THREE.DoubleSide
+        });
+        const pipe = new THREE.Mesh(pipeGeometry, pipeMaterial);
+        pipe.position.x = PIPE_LENGTH / 2; // Center the pipe
+        scene.add(pipe);
+
+        // 2. End Caps (Visual aids for open/closed)
+        const capGeometry = new THREE.PlaneGeometry(1.5, 1.5);
+        // Closed End (Node): Red
+        const closedCapMaterial = new THREE.MeshBasicMaterial({ color: 0xef4444, side: THREE.DoubleSide }); // Red-500
+        const closedCap = new THREE.Mesh(capGeometry, closedCapMaterial);
+        closedCap.position.set(0, 0, 0);
+        closedCap.rotation.y = Math.PI / 2; 
+        scene.add(closedCap);
+
+        // Open End (Antinode): Green
+        const openCapMaterial = new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: 0.5, side: THREE.DoubleSide }); // Green-500
+        const openCap = new THREE.Mesh(capGeometry, openCapMaterial);
+        openCap.position.set(PIPE_LENGTH, 0, 0);
+        openCap.rotation.y = Math.PI / 2;
+        scene.add(openCap);
+        
+        // 3. The Wave (Line)
+        const waveMaterial = new THREE.LineBasicMaterial({ color: 0x6366f1, linewidth: 3 }); // Indigo-500
+        const wavePoints = [];
+        for (let i = 0; i <= SEGMENTS; i++) {
+            wavePoints.push(new THREE.Vector3(0, 0, 0));
+        }
+        const waveGeometry = new THREE.BufferGeometry().setFromPoints(wavePoints);
+        const waveLine = new THREE.Line(waveGeometry, waveMaterial);
+        scene.add(waveLine);
+
+        // 4. Node/Antinode Markers (Small Spheres)
+        const markerGeometry = new THREE.SphereGeometry(0.1, 16, 16);
+        const nodeMaterial = new THREE.MeshBasicMaterial({ color: 0xfb923c }); // Orange for Nodes
+        const antinodeMaterial = new THREE.MeshBasicMaterial({ color: 0x34d399 }); // Teal for Antinodes
+        const markers = [];
+        
+        // --- Simulation State ---
+        let n = 1; // Current harmonic (must be odd: 1, 3, 5, ...)
+        let omega; // Angular frequency (2 * pi * f)
+
+        // --- Functions ---
+        
+        /**
+         * Calculates the displacement of the standing wave at position x and time t.
+         * Closed-Open Pipe: y(x, t) = A * sin(k_n * x) * cos(omega_n * t)
+         * Where k_n = (n * PI) / (2 * L)
+         */
+        function getDisplacement(x, time) {
+            // x is the position along the pipe (0 to PIPE_LENGTH)
+            const k = (n * Math.PI) / (2 * PIPE_LENGTH);
+            const amplitudeAtX = MAX_AMPLITUDE * Math.sin(k * x);
+            return amplitudeAtX * Math.cos(omega * time);
+        }
+
+        /**
+         * Updates the geometry and UI based on the selected harmonic 'n'.
+         */
+        function updateSimulation() {
+            // 1. Calculate new properties
+            const lengthL = PIPE_LENGTH / 10; // Use 1.0m for real physics calculation
+            const lambda = (4 * lengthL) / n;
+            const frequency = (n * WAVE_SPEED) / (4 * lengthL);
+            omega = 2 * Math.PI * frequency;
+
+            // 2. Update UI Displays
+            document.getElementById('nDisplay').textContent = n;
+            document.getElementById('lambdaDisplay').textContent = `${(lambda).toFixed(2)} m`;
+            document.getElementById('frequencyDisplay').textContent = `${(frequency).toFixed(2)} Hz`;
+
+            // 3. Update Node/Antinode List
+            const naList = document.getElementById('nodeAntinodeList');
+            naList.innerHTML = '';
+
+            // Remove old markers
+            markers.forEach(m => scene.remove(m));
+            markers.length = 0;
+
+            // Calculate and display N/A positions
+            const positions = [];
+            for (let i = 0; i <= n; i++) {
+                const position_m = (i * lengthL) / n; // Position in meters from the closed end
+                const position_3d = (i * PIPE_LENGTH) / n; // Position in 3D units
+
+                let type;
+                let color;
+                // Closed end (i=0) is always a Node (N)
+                // Open end (i=n) is always an Antinode (A)
+                if (i % 2 === 0) {
+                    type = 'Node (N)'; // Occurs at even multiples of L/n
+                    color = 'text-red-400';
+                    // Add a Node marker
+                    const nodeMarker = new THREE.Mesh(markerGeometry, nodeMaterial);
+                    nodeMarker.position.set(position_3d, 0, 0);
+                    scene.add(nodeMarker);
+                    markers.push(nodeMarker);
+                } else {
+                    type = 'Antinode (A)'; // Occurs at odd multiples of L/n
+                    color = 'text-green-400';
+                    // Add an Antinode marker
+                    const antinodeMarker = new THREE.Mesh(markerGeometry, antinodeMaterial);
+                    antinodeMarker.position.set(position_3d, 0, 0);
+                    scene.add(antinodeMarker);
+                    markers.push(antinodeMarker);
+                }
+                
+                // Add to list
+                naList.innerHTML += `<p class="${color}">${type} at x = ${(position_m * 100).toFixed(1)} cm</p>`;
+            }
+            
+            // Re-render the wave points geometry once to apply the new positions, then animate.
+            const positionsArray = waveLine.geometry.attributes.position.array;
+            for (let i = 0; i <= SEGMENTS; i++) {
+                const x = (i / SEGMENTS) * PIPE_LENGTH;
+                const index = i * 3;
+                positionsArray[index] = x;
+                positionsArray[index + 1] = 0;
+                positionsArray[index + 2] = 0;
+            }
+            waveLine.geometry.attributes.position.needsUpdate = true;
+        }
+
+
+        // --- Animation Loop ---
+        let startTime = Date.now();
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const elapsedTime = (Date.now() - startTime) / 1000;
+
+            // 1. Update Wave Position
+            const positionsArray = waveLine.geometry.attributes.position.array;
+            for (let i = 0; i <= SEGMENTS; i++) {
+                const x = (i / SEGMENTS) * PIPE_LENGTH;
+                const y = getDisplacement(x, elapsedTime);
+                const z = y * 0.1; // Make it 3D by adding small Z oscillation
+
+                const index = i * 3;
+                positionsArray[index] = x;
+                positionsArray[index + 1] = y;
+                positionsArray[index + 2] = z; 
+            }
+            waveLine.geometry.attributes.position.needsUpdate = true;
+            
+            // 2. Update Markers (they should stay at (y=0, z=0))
+            // The marker positions are set during updateSimulation and don't change in the loop.
+
+            // 3. Render
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // --- Event Listeners ---
+        
+        // Handle dropdown change
+        document.getElementById('harmonicSelector').addEventListener('change', (event) => {
+            n = parseInt(event.target.value);
+            startTime = Date.now(); // Reset animation time for cleaner transition
+            updateSimulation();
+        });
+
+        // Handle window resize
+        function onWindowResize() {
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        }
+        window.addEventListener('resize', onWindowResize, false);
+        
+        // --- Initialization ---
+        updateSimulation(); // Initial setup
+        animate();         // Start the animation loop
+
+    </script>
+</body>
+</html>
