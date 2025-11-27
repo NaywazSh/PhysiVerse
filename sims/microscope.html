@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Microscope Simulation</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f9;
+            color: #1f2937;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+        }
+        .container {
+            display: flex;
+            flex-grow: 1;
+            width: 95%;
+            max-width: 900px; /* Reduced max width for compactness */
+            margin-top: 15px;
+            gap: 15px;
+        }
+        #microscope-container {
+            flex: 1;
+            min-height: 350px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            background-color: #ffffff;
+        }
+        #view-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        #magnified-view {
+            flex: 1;
+            background-color: #0d1a26; /* Dark background for the FOV */
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 250px;
+            /* Faux-circular field of view appearance */
+            border: 2px solid #000;
+            outline: 20px solid #0d1a26;
+        }
+        .control-panel {
+            width: 95%;
+            max-width: 900px;
+            background-color: #ffffff;
+            padding: 15px 25px;
+            margin-bottom: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            width: 45%;
+        }
+        label {
+            font-weight: 700;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+        }
+        input[type="range"] {
+            width: 100%;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 8px;
+            background: #e0e7ff;
+            outline: none;
+            opacity: 0.9;
+            transition: opacity .15s;
+            border-radius: 4px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #4f46e5;
+            cursor: pointer;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+        /* New styles for organism shapes */
+        .magnified-organism {
+            position: absolute;
+            /* Default base styles */
+            transition: filter 0.1s, opacity 0.1s, transform 0.1s; /* Added transform for smoother scaling */
+            text-shadow: none; 
+            user-select: none;
+        }
+        .cocci { /* Spherical bacteria */
+            border-radius: 50%;
+            background-color: #a7f3d0; /* Pale Green */
+        }
+        .bacilli { /* Rod-shaped bacteria */
+            border-radius: 3px;
+            background-color: #93c5fd; /* Light Blue */
+        }
+        .spirillum { /* Long, spinning rod to simulate spiral shape */
+            border-radius: 3px;
+            background-color: #fca5a5; /* Light Red/Pink for contrast */
+        }
+        
+        h1 {
+            color: #4f46e5;
+            margin: 10px 0 0 0;
+            font-size: 1.5rem;
+        }
+        .info-box {
+            background-color: #eef2ff;
+            border: 1px solid #c7d2fe;
+            color: #4f46e5;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            margin-top: 5px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                flex-direction: column;
+                width: 95%;
+            }
+            .control-panel {
+                flex-direction: column;
+            }
+            .control-group {
+                width: 100%;
+                margin-bottom: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🔬 3D Microscope & Microorganism Simulation</h1>
+
+    <div class="container">
+        <!-- 3D Microscope View -->
+        <div id="microscope-container">
+            <!-- Three.js renderer will append its canvas here -->
+        </div>
+
+        <!-- Magnified Field of View -->
+        <div id="view-container">
+            <div id="magnified-view">
+                <p class="info-box">Loading specimen view...</p>
+                <!-- Organisms will be rendered here as DOM elements -->
+            </div>
+            <div class="info-box">
+                Use the Focus knob to sharpen the image. The moving shapes simulate live bacteria morphology: Cocci, Bacilli, and Spirillum. You can move the 3D microscope by dragging it.
+            </div>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="control-panel">
+        <div class="control-group">
+            <label for="focus-slider">Focus Knob (Sharpness/Clarity)</label>
+            <input type="range" id="focus-slider" min="0" max="100" value="50">
+        </div>
+        <div class="control-group">
+            <label for="move-slider">Organism Speed</label>
+            <input type="range" id="move-slider" min="1" max="100" value="50">
+        </div>
+    </div>
+
+    <script type="module">
+        // --- Configuration ---
+        const ORGANISM_COUNT = 30; // Increased count for better visual density
+        const VIEW_SIZE = 1000; // Logical size for positioning organisms (not pixel size)
+        const ORGANISM_SHAPES = ['cocci', 'bacilli', 'spirillum'];
+        
+        // --- Three.js Setup (Microscope) ---
+        let scene, camera, renderer, microscopeGroup;
+        let container = document.getElementById('microscope-container');
+        let width = container.clientWidth;
+        let height = container.clientHeight;
+
+        function init3D() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xEEEEEE);
+            
+            camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
+            camera.position.set(20, 15, 20);
+            camera.lookAt(0, 8, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // Lighting
+            scene.add(new THREE.AmbientLight(0x606060));
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(15, 30, 15);
+            scene.add(directionalLight);
+            
+            const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            fillLight.position.set(-15, -10, -15);
+            scene.add(fillLight);
+
+            microscopeGroup = new THREE.Group();
+            createMicroscope();
+            scene.add(microscopeGroup);
+
+            // Simple Orbit Control (using basic mouse events, not external controls)
+            let isDragging = false;
+            let previousMousePosition = { x: 0, y: 0 };
+            
+            renderer.domElement.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                
+                const deltaX = e.clientX - previousMousePosition.x;
+                const deltaY = e.clientY - previousMousePosition.y;
+
+                // Adjust rotation based on mouse movement
+                microscopeGroup.rotation.y += deltaX * 0.005;
+                // Limit X rotation to prevent flipping
+                microscopeGroup.rotation.x = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, microscopeGroup.rotation.x + deltaY * 0.005));
+
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createMicroscope() {
+            const material = new THREE.MeshPhongMaterial({ color: 0x333333, shininess: 30 });
+            const stageMaterial = new THREE.MeshPhongMaterial({ color: 0x505050, shininess: 50 });
+            const lensMaterial = new THREE.MeshPhongMaterial({ color: 0x90A4AE, shininess: 60 });
+            const lensGlassMaterial = new THREE.MeshPhongMaterial({ color: 0xADD8E6, opacity: 0.5, transparent: true });
+            const glassMaterial = new THREE.MeshPhongMaterial({ color: 0xf3f4f6, opacity: 0.8, transparent: true });
+
+
+            // 1. Base
+            const base = new THREE.Mesh(new THREE.BoxGeometry(10, 1, 12), stageMaterial);
+            base.position.y = 0.5;
+            microscopeGroup.add(base);
+
+            // 2. Arm (Stand)
+            const armGeom = new THREE.BoxGeometry(2, 16, 2);
+            const arm = new THREE.Mesh(armGeom, material);
+            arm.position.set(0, 9, 0);
+            microscopeGroup.add(arm);
+
+            // 3. Eyepiece Tube (Head)
+            const tubeGeom = new THREE.CylinderGeometry(1.5, 1.5, 4, 32);
+            const tube = new THREE.Mesh(tubeGeom, material);
+            tube.position.set(0, 18, -2);
+            tube.rotation.z = Math.PI / 6;
+            microscopeGroup.add(tube);
+            
+            // Eyepiece lens
+            const eyepieceGeom = new THREE.CylinderGeometry(1, 1, 0.5, 32);
+            const eyepiece = new THREE.Mesh(eyepieceGeom, lensGlassMaterial);
+            eyepiece.position.set(tube.position.x - 4 * Math.sin(Math.PI / 6), 
+                                  tube.position.y + 4 * Math.cos(Math.PI / 6), 
+                                  tube.position.z);
+            eyepiece.rotation.z = Math.PI / 6;
+            microscopeGroup.add(eyepiece);
+
+
+            // 4. Stage (where the slide goes)
+            const stage = new THREE.Mesh(new THREE.BoxGeometry(8, 0.5, 8), stageMaterial);
+            stage.position.y = 6;
+            stage.name = 'Stage';
+            microscopeGroup.add(stage);
+
+            // 4b. Slide on the Stage
+            const slide = new THREE.Mesh(new THREE.BoxGeometry(7, 0.1, 3), glassMaterial);
+            slide.position.y = 6.3;
+            slide.position.z = 0;
+            microscopeGroup.add(slide);
+
+            // 4c. Specimen spot on the slide
+            const specimen = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.1, 16), new THREE.MeshBasicMaterial({ color: 0x222222 }));
+            specimen.position.y = 6.35;
+            specimen.position.z = 0;
+            microscopeGroup.add(specimen);
+
+
+            // 5. Nosepiece (Revolver)
+            const nosepieceGeom = new THREE.CylinderGeometry(2.5, 2.5, 1, 32);
+            const nosepiece = new THREE.Mesh(nosepieceGeom, material);
+            nosepiece.position.set(0, 10, -1.5);
+            nosepiece.rotation.x = Math.PI / 2;
+            microscopeGroup.add(nosepiece);
+
+            // 6. Objective Lenses
+            const lensPositions = [
+                { x: 1.5, z: -1.5, color: 0xf59e0b }, // Low power (Yellow)
+                { x: 0, z: -1.5, color: 0xef4444 },   // Medium power (Red)
+                { x: -1.5, z: -1.5, color: 0x3b82f6 },// High power (Blue)
+            ];
+
+            lensPositions.forEach(pos => {
+                const objectiveMaterial = new THREE.MeshPhongMaterial({ color: pos.color, shininess: 60 });
+                const objectiveGeom = new THREE.CylinderGeometry(0.5, 0.5, 4, 16);
+                const objective = new THREE.Mesh(objectiveGeom, objectiveMaterial);
+                objective.position.set(pos.x, 7.5, pos.z);
+                microscopeGroup.add(objective);
+
+                // Small lens tip
+                const lensTipGeom = new THREE.CylinderGeometry(0.3, 0.3, 1, 16);
+                const lensTip = new THREE.Mesh(lensTipGeom, lensGlassMaterial);
+                lensTip.position.set(pos.x, 5.5, pos.z);
+                microscopeGroup.add(lensTip);
+            });
+            
+            // 7. Illuminator/Light Source (below the stage)
+            const illuminatorGeom = new THREE.CylinderGeometry(2, 2, 2, 32);
+            const illuminator = new THREE.Mesh(illuminatorGeom, material);
+            illuminator.position.y = 3;
+            illuminator.name = 'Illuminator';
+            microscopeGroup.add(illuminator);
+
+
+            // Set the pivot point to the center of the base
+            microscopeGroup.position.y = -6; // Adjust vertical position to be centered
+        }
+
+        function onWindowResize() {
+            width = container.clientWidth;
+            height = container.clientHeight;
+            if (camera) {
+                camera.aspect = width / height;
+                camera.updateProjectionMatrix();
+            }
+            if (renderer) {
+                renderer.setSize(width, height);
+            }
+        }
+        
+        /**
+         * Adjusts the 3D camera position based on the focus slider value.
+         * This simulates the objective lens moving relative to the specimen.
+         * @param {number} level - Focus level (0 to 100).
+         */
+        function updateCameraFocus(level) {
+            // Map focus level (0-100) to camera movement range (e.g., -1 to 1 unit deviation from default y=15)
+            // Focus 50 (middle) should be the default camera position (y=15)
+            // Focus 0 (far) should be y=15 + 1 = 16 (or farther away)
+            // Focus 100 (near) should be y=15 - 1 = 14 (or closer)
+            
+            const defaultY = 15;
+            const movementRange = 2; // How much the camera moves in Y
+            
+            // Calculate offset: range is -1 to 1, centered at 0 when level is 50
+            // (level / 50) - 1 maps 0->-1, 50->0, 100->1
+            const offset = ((level / 50) - 1) * (movementRange / 2); 
+
+            // Update camera position
+            camera.position.y = defaultY - offset;
+            
+            // Re-point the camera to keep the center of the microscope stable
+            camera.lookAt(0, 8, 0); 
+        }
+
+        // --- Magnified View Simulation (2D/DOM) ---
+        const magnifiedView = document.getElementById('magnified-view');
+        let organisms = [];
+        let focusLevel = 50; // 0 to 100
+        let speedMultiplier = 5; // Default speed is now 5x faster
+
+        const focusSlider = document.getElementById('focus-slider');
+        const speedSlider = document.getElementById('move-slider');
+
+        focusSlider.addEventListener('input', (e) => {
+            focusLevel = parseFloat(e.target.value);
+            updateCameraFocus(focusLevel);
+        });
+
+        speedSlider.addEventListener('input', (e) => {
+            // Slider value 50 now results in 5x speed (50/10 = 5)
+            speedMultiplier = parseFloat(e.target.value) / 10; 
+        });
+
+        class Organism {
+            constructor(id) {
+                this.id = id;
+                this.x = Math.random() * VIEW_SIZE;
+                this.y = Math.random() * VIEW_SIZE;
+                this.vx = (Math.random() - 0.5) * 0.5;
+                this.vy = (Math.random() - 0.5) * 0.5;
+                
+                this.shape = ORGANISM_SHAPES[Math.floor(Math.random() * ORGANISM_SHAPES.length)];
+                
+                this.element = document.createElement('div');
+                this.element.className = 'magnified-organism ' + this.shape;
+                magnifiedView.appendChild(this.element);
+
+                // Set initial size and rotation
+                this.baseSize = 8 + Math.random() * 8; // Size between 8px and 16px
+                this.rotation = Math.random() * 360; // Initial random rotation
+                this.spinRate = (Math.random() - 0.5) * 2; // Slight spin
+
+                this.setDimensions(this.baseSize, 1.0); // Initialize dimensions
+            }
+
+            setDimensions(baseSize, scaleFactor) {
+                if (this.shape === 'cocci') {
+                    this.element.style.width = `${baseSize * scaleFactor}px`;
+                    this.element.style.height = `${baseSize * scaleFactor}px`;
+                } else if (this.shape === 'bacilli') {
+                    this.element.style.width = `${baseSize * 1.5 * scaleFactor}px`;
+                    this.element.style.height = `${baseSize * 0.8 * scaleFactor}px`;
+                } else if (this.shape === 'spirillum') {
+                    this.element.style.width = `${this.baseSize * 2.5 * scaleFactor}px`;
+                    this.element.style.height = `${this.baseSize * 0.5 * scaleFactor}px`;
+                    this.element.style.borderRadius = '3px'; 
+                    this.spinRate = (this.spinRate > 0 ? 1 : -1) * 6; // Fast spin for spirillum
+                }
+            }
+
+            update(deltaTime) {
+                // Apply movement
+                this.x += this.vx * deltaTime * speedMultiplier;
+                this.y += this.vy * deltaTime * speedMultiplier;
+                this.rotation += this.spinRate * deltaTime * speedMultiplier;
+
+                // Bounce off edges of the logical view space
+                if (this.x < 0 || this.x > VIEW_SIZE) {
+                    this.vx *= -1;
+                    this.x = Math.min(VIEW_SIZE, Math.max(0, this.x));
+                }
+                if (this.y < 0 || this.y > VIEW_SIZE) {
+                    this.vy *= -1;
+                    this.y = Math.min(VIEW_SIZE, Math.max(0, this.y));
+                }
+            }
+
+            render() {
+                // Map logical position (0 to VIEW_SIZE) to percentage (0% to 100%)
+                const px = (this.x / VIEW_SIZE) * 100;
+                const py = (this.y / VIEW_SIZE) * 100;
+
+                // Determine blur level based on focus distance
+                const focusDistance = Math.abs(focusLevel - 50);
+                // Max blur is 5px at distance 50 (0 or 100 focus), min blur is 0px at distance 0 (50 focus)
+                const blur = Math.min(5, focusDistance / 10);
+                
+                // Scale factor for depth simulation: Smaller when out of focus
+                // Max scale 1.0 at focus 50, Min scale 0.75 at focus 0 or 100
+                const scaleFactor = 1.0 - (focusDistance / 50) * 0.25;
+
+                this.setDimensions(this.baseSize, scaleFactor);
+
+
+                this.element.style.transform = `translate(-50%, -50%) translate(${px}%, ${py}%) rotate(${this.rotation}deg)`;
+                this.element.style.filter = `blur(${blur}px)`;
+                this.element.style.opacity = 1 - (focusDistance / 50) * 0.5; // Fade out slightly when highly out of focus
+            }
+        }
+
+        function setupMagnifiedView() {
+            // Remove the loading message
+            const loadingMessage = magnifiedView.querySelector('.info-box');
+            if (loadingMessage) {
+                magnifiedView.removeChild(loadingMessage);
+            }
+
+            for (let i = 0; i < ORGANISM_COUNT; i++) {
+                organisms.push(new Organism(i));
+            }
+        }
+
+        // --- Animation Loop ---
+        let lastTime = 0;
+        let clock = new THREE.Clock();
+
+        function animate(currentTime) {
+            requestAnimationFrame(animate);
+
+            const deltaTime = clock.getDelta();
+
+            // 1. Update 3D Microscope
+            renderer.render(scene, camera);
+
+            // 2. Update Magnified Organisms
+            organisms.forEach(organism => {
+                organism.update(deltaTime);
+                organism.render();
+            });
+
+            lastTime = currentTime;
+        }
+        
+        // --- Initialization ---
+        window.onload = function () {
+            // Ensure the container has dimensions before initializing Three.js
+            onWindowResize(); 
+            init3D();
+            updateCameraFocus(focusLevel); // Set initial camera position
+            setupMagnifiedView();
+            animate(0); // Start the animation loop
+        }
+    </script>
+</body>
+</html>
