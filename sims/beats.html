@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Wave Beats Simulation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        /* Custom styles for the 3D container */
+        #scene-container {
+            width: 100%;
+            height: 80vh; /* Viewport height for the canvas */
+            cursor: grab;
+            touch-action: none; /* Prevents unwanted scrolling on touch devices */
+        }
+        /* Style for the formula box to make the math look good */
+        .formula-box {
+            font-family: 'Times New Roman', Times, serif;
+        }
+        /* Custom styles for the 3D canvas */
+        canvas {
+            display: block;
+        }
+    </style>
+    <script>
+        // Set up the Tailwind configuration to use the Inter font
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                },
+            },
+        }
+    </script>
+</head>
+<body class="bg-gray-900 text-white font-sans flex flex-col items-center p-4 min-h-screen">
+
+    <div class="text-center mb-6">
+        <h1 class="text-4xl font-extrabold text-blue-400">3D Wave Beat Simulation</h1>
+        <p class="text-gray-300 mt-2">Visualize the superposition of two waves with slightly different frequencies.</p>
+        
+        <!-- Formula Display Box - CORRECTED -->
+        <div class="formula-box mt-4 p-3 bg-gray-800 rounded-lg shadow-lg inline-block">
+            <p class="text-lg">Beat Frequency:
+                <span class="text-yellow-400 text-2xl font-bold">
+                    f<sub class="text-base">beat</sub> = |f<sub class="text-base">2</sub> - f<sub class="text-base">1</sub>|
+                </span>
+            </p>
+            <p class="text-sm text-gray-400 mt-1">Rotate with mouse, Zoom with scroll/pinch.</p>
+        </div>
+    </div>
+
+    <!-- 3D Scene Container -->
+    <div id="scene-container" class="rounded-xl shadow-2xl bg-gray-800/50 border border-gray-700"></div>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let wave1, wave2, beatWave, envelope1, envelope2;
+        let clock = new THREE.Clock();
+        
+        // --- Simulation Parameters ---
+        // Changed const to var to fix the 'already declared' error in some execution environments.
+        var A = 5; // Amplitude
+        var L = 50; // Length of the wave path (X-axis range)
+        var N = 500; // Number of segments/points
+        var f1 = 2.0; // Frequency 1 (lower)
+        var f2 = 2.2; // Frequency 2 (higher, creating a beat frequency of 0.2)
+        var beatFrequency = Math.abs(f2 - f1);
+        var Z_OFFSET = 0.5; // Small offset for 3D separation
+
+        // --- Utility Functions ---
+
+        /**
+         * Calculates the y-position of a wave at a given x and time t.
+         * @param {number} x - Position on the X-axis.
+         * @param {number} f - Frequency.
+         * @param {number} t - Time offset for movement.
+         * @param {number} amplitude - Wave amplitude.
+         * @returns {number} The y (amplitude) value.
+         */
+        function calculateWaveY(x, f, t, amplitude = A) {
+            // Using a wave equation: y = A * sin(k*x - w*t)
+            // Where k = 2*pi*f_spatial and w = 2*pi*f_temporal.
+            // For simplicity in visualization, we use a factor of f on the position (x)
+            return amplitude * Math.sin(2 * Math.PI * f * x / L + t);
+        }
+
+        /**
+         * Creates a 3D line from an array of points.
+         * @param {THREE.Vector3[]} points - Array of points.
+         * @param {number} color - Hex color of the line.
+         * @param {number} lineWidth - Thickness of the line.
+         * @returns {THREE.Line} The created Line object.
+         */
+        function createLine(points, color, lineWidth = 1) {
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({ 
+                color: color, 
+                linewidth: lineWidth 
+            });
+            return new THREE.Line(geometry, material);
+        }
+
+        /**
+         * Creates a 3D curve representing a wave.
+         * @param {number} color - Hex color.
+         * @param {number} zPosition - Z-position for depth.
+         * @param {number} frequency - Base frequency for the wave.
+         * @param {number} lineWidth - Line thickness.
+         * @returns {THREE.Line} The created Line object.
+         */
+        function createWave(color, zPosition, frequency, lineWidth) {
+            const points = [];
+            for (let i = 0; i <= N; i++) {
+                const x = (i / N) * L - (L / 2); // Map x from -L/2 to L/2
+                points.push(new THREE.Vector3(x, 0, zPosition));
+            }
+            const line = createLine(points, color, lineWidth);
+            line.userData = { frequency: frequency, zPosition: zPosition };
+            scene.add(line);
+            return line;
+        }
+
+        /**
+         * Creates a visual representation of the Beat Envelope.
+         * The envelope is defined by the amplitude modulation: A_mod(x) = 2A * |cos(pi * (f2-f1) * x / L)|
+         * @param {number} sign - +1 for the top envelope, -1 for the bottom.
+         * @returns {THREE.Line} The created Line object.
+         */
+        function createEnvelope(sign) {
+            const points = [];
+            for (let i = 0; i <= N; i++) {
+                const x = (i / N) * L - (L / 2);
+                points.push(new THREE.Vector3(x, 0, 0));
+            }
+            const line = createLine(points, 0xFFCC00, 2); // Yellow color for envelope
+            line.userData = { sign: sign };
+            scene.add(line);
+            return line;
+        }
+
+
+        // --- Initialization and Setup ---
+
+        function init() {
+            const container = document.getElementById('scene-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1f2937); // Dark gray background
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+            // Modified camera position: moved closer (Z=25, down Y=10) to enlarge the viewable area.
+            camera.position.set(0, 10, 25);
+            camera.lookAt(0, 0, 0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(width, height);
+            container.appendChild(renderer.domElement);
+
+            // Controls (Rotation and Zoom)
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; // for a smoother experience
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 10;
+            controls.maxDistance = 100;
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+            directionalLight.position.set(10, 15, 10);
+            scene.add(directionalLight);
+
+            // Axis Helper (X-axis only for the wave)
+            const xAxisPoints = [
+                new THREE.Vector3(-L/2 - 2, 0, 0),
+                new THREE.Vector3(L/2 + 2, 0, 0)
+            ];
+            const xAxis = createLine(xAxisPoints, 0x888888, 1);
+            scene.add(xAxis);
+
+            // Create Waves
+            wave1 = createWave(0x3B82F6, Z_OFFSET, f1, 2); // Blue, Z-offset
+            wave2 = createWave(0xEF4444, -Z_OFFSET, f2, 2); // Red, -Z-offset
+            beatWave = createWave(0x9333EA, 0, beatFrequency, 4); // Purple/Dark, No Z-offset
+            beatWave.material.color.set(0x9333EA); // Ensure color is set for the thicker line
+
+            // Create Envelopes
+            envelope1 = createEnvelope(1);
+            envelope2 = createEnvelope(-1);
+
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('scene-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        }
+
+        // --- Update and Animation Loop ---
+
+        function updateWaves() {
+            // Modified time factor: reduced from * 10 to * 5 to make the movement 2x slower
+            const t = clock.getElapsedTime() * 5; // Time factor for wave motion
+
+            // 1. Update Wave 1 (Blue)
+            const positions1 = wave1.geometry.attributes.position;
+            for (let i = 0; i <= N; i++) {
+                const x = (i / N) * L - (L / 2);
+                const y = calculateWaveY(x, f1, t);
+                positions1.setY(i, y);
+            }
+            positions1.needsUpdate = true;
+
+            // 2. Update Wave 2 (Red)
+            const positions2 = wave2.geometry.attributes.position;
+            for (let i = 0; i <= N; i++) {
+                const x = (i / N) * L - (L / 2);
+                const y = calculateWaveY(x, f2, t);
+                positions2.setY(i, y);
+            }
+            positions2.needsUpdate = true;
+
+            // 3. Update Beat Wave (Purple/Dark) and Envelopes
+            const positionsBeat = beatWave.geometry.attributes.position;
+            const positionsEnv1 = envelope1.geometry.attributes.position;
+            const positionsEnv2 = envelope2.geometry.attributes.position;
+
+            for (let i = 0; i <= N; i++) {
+                const x = (i / N) * L - (L / 2);
+
+                // Calculate individual wave amplitudes at current time t
+                const y1 = calculateWaveY(x, f1, t, A);
+                const y2 = calculateWaveY(x, f2, t, A);
+
+                // Resultant wave (Superposition)
+                const y_beat = y1 + y2;
+                positionsBeat.setY(i, y_beat);
+                
+                // Envelope (Amplitude Modulation: A_mod(x) = 2A * |cos(pi * (f2-f1) * x / L)|)
+                // The factor (f2-f1) determines the spatial period of the beat.
+                const envelope_y = 2 * A * Math.abs(Math.cos(Math.PI * (f2 - f1) * x / L));
+                
+                // Set both upper and lower envelopes
+                positionsEnv1.setY(i, envelope_y);
+                positionsEnv2.setY(i, -envelope_y);
+            }
+
+            positionsBeat.needsUpdate = true;
+            positionsEnv1.needsUpdate = true;
+            positionsEnv2.needsUpdate = true;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // only required if controls.enableDamping is set to true
+            updateWaves();
+            renderer.render(scene, camera);
+        }
+
+        // Initialize the scene when the window loads
+        window.onload = function () {
+            init();
+            animate();
+        };
+
+    </script>
+</body>
+</html>
