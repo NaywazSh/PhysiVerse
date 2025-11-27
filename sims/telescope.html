@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modern Telescope & Energetic Space</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js Library --><script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        /* Custom styles for the simulation */
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #0b0c10; /* Very dark background for space */
+        }
+        #scene-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        #controls {
+            position: absolute;
+            top: 1rem; /* Added margin from top */
+            left: 1rem; /* Moved to the left */
+            width: auto; /* Allow content to dictate width */
+            padding: 0; /* Removed padding from container */
+            color: white;
+            /* Changed from justify-center to initial to align left */
+            display: initial; 
+            background: rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+            z-index: 10;
+        }
+        .info-box {
+            /* Adjusted size and padding to make it tiny and more square */
+            width: 180px; 
+            height: 120px;
+            background: rgba(23, 27, 36, 0.9);
+            border: 1px solid #3a414e;
+            padding: 0.5rem; /* Reduced padding */
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            /* Ensure text wraps neatly */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .title {
+            font-size: 1.1rem; /* Reduced font size */
+            font-weight: bold;
+            color: #fcd34d; /* Yellow/Gold title */
+            margin-bottom: 0.25rem;
+        }
+        .instructions {
+            margin-top: 0.25rem;
+            font-size: 0.75rem; /* Reduced font size */
+            color: #a0aec0;
+        }
+    </style>
+</head>
+<body>
+
+<div id="scene-container">
+    <!-- The Three.js canvas will be injected here --></div>
+
+<div id="controls">
+    <div class="info-box">
+        <div class="title">3D Telescope View</div>
+        <div class="instructions">
+            Drag to orbit.
+            <span class="font-bold text-yellow-300">Scroll/Pinch to zoom.</span>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- Global Variables ---
+    let scene, camera, renderer, container;
+    let mainGroup; // Group to hold everything for easy rotation/orbit
+    
+    // Core interaction state
+    let isDragging = false;
+    let previousMousePosition = { x: 0, y: 0 };
+    
+    // Constants
+    const rotationSpeed = 0.005;
+    const autoRotationSpeed = 0.003; 
+
+    // Zoom & Target Variables (target must be initialized after THREE loads)
+    const zoomSensitivity = 1.5;
+    const minZoomDistance = 3.0;
+    const maxZoomDistance = 20.0; 
+    let target; // Declared here, assigned in init()
+    
+    // Dynamic Scene Elements
+    const planets = [];
+    const stars = [];
+    const comets = [];
+    
+    // Comet Control
+    const cometSpawnInterval = 50;
+    let lastCometSpawnTime = 0;
+    const cometSpeed = 1.5;
+    const cometFadeDuration = 3000; 
+
+    // --- Helper Functions ---
+
+    /**
+     * Creates a more modern, articulated telescope model with distinct lenses.
+     * @returns {THREE.Group} The telescope object.
+     */
+    function createModernTelescope() {
+        const telescope = new THREE.Group();
+
+        // Base/Pedestal (This is the highlighted element - A wide, short cylinder)
+        const baseGeometry = new THREE.CylinderGeometry(0.8, 1.2, 0.5, 32);
+        const baseMaterial = new THREE.MeshStandardMaterial({
+            color: 0xcc9900, // Brass
+            metalness: 0.8,
+            roughness: 0.4
+        });
+        const base = new THREE.Mesh(baseGeometry, baseMaterial);
+        base.position.y = 0.25;
+        telescope.add(base);
+
+        // Mount Arm 1 (Pivot point - Dark Brass)
+        const arm1Geometry = new THREE.BoxGeometry(0.3, 1.5, 0.3);
+        const arm1Material = new THREE.MeshStandardMaterial({
+            color: 0xb8860b, // Darker Brass
+            metalness: 0.7,
+            roughness: 0.5
+        });
+        const arm1 = new THREE.Mesh(arm1Geometry, arm1Material);
+        arm1.position.set(0.6, 1.2, 0);
+        arm1.rotation.z = Math.PI / 6; // Slight angle
+        telescope.add(arm1);
+
+        // Mount Arm 2 (Connects to telescope tube - Dark Brass)
+        const arm2Geometry = new THREE.BoxGeometry(0.3, 1.5, 0.3);
+        const arm2Material = new THREE.MeshStandardMaterial({
+            color: 0xb8860b, // Darker Brass
+            metalness: 0.7,
+            roughness: 0.5
+        });
+        const arm2 = new THREE.Mesh(arm2Geometry, arm2Material);
+        arm2.position.set(-0.6, 1.2, 0);
+        arm2.rotation.z = -Math.PI / 6; // Opposite angle
+        telescope.add(arm2);
+
+        // Main Telescope Tube (Angled - Golden/Bronze)
+        const tubeGeometry = new THREE.CylinderGeometry(0.2, 0.3, 4, 32);
+        const tubeMaterial = new THREE.MeshStandardMaterial({
+            color: 0xdaa520, // Golden Bronze
+            metalness: 0.9,
+            roughness: 0.2
+        });
+        const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
+        tube.position.y = 2.5; // Lift it up
+        tube.rotation.x = Math.PI / 2; // Point it upwards
+        tube.rotation.z = Math.PI * 0.2; // Angle towards the sky
+        telescope.add(tube);
+        
+        // --- OBJECTIVE LENS (FRONT) ---
+        const objectiveLensGeometry = new THREE.CylinderGeometry(0.29, 0.29, 0.02, 32); // Thin disc
+        const objectiveLensMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0xbbddff, // Light blue tint
+            metalness: 0.0,
+            roughness: 0.1,
+            opacity: 0.4, // Partially transparent
+            transparent: true,
+            clearcoat: 1.0, // High reflectivity for realism
+            clearcoatRoughness: 0.1,
+        });
+        const objectiveLens = new THREE.Mesh(objectiveLensGeometry, objectiveLensMaterial);
+        objectiveLens.rotation.x = Math.PI / 2;
+        objectiveLens.position.set(0, 0, 2.0); // Position at the very front end of the tube
+        tube.add(objectiveLens);
+
+        // Finderscope (Small tube on top - Black)
+        const finderscopeGeometry = new THREE.CylinderGeometry(0.04, 0.04, 0.6, 16);
+        const finderscopeMaterial = new THREE.MeshStandardMaterial({ color: 0x1a202c, metalness: 0.8, roughness: 0.3 });
+        const finderscope = new THREE.Mesh(finderscopeGeometry, finderscopeMaterial);
+        finderscope.position.set(0.15, 0, 1.9); // Relative to main tube
+        tube.add(finderscope); 
+
+        // Eyepiece Casing (Small cylinder at the back - Silver/Gray)
+        const eyepieceGeometry = new THREE.CylinderGeometry(0.08, 0.08, 0.3, 16);
+        const eyepieceMaterial = new THREE.MeshStandardMaterial({ color: 0x718096, metalness: 0.5, roughness: 0.5 });
+        const eyepiece = new THREE.Mesh(eyepieceGeometry, eyepieceMaterial);
+        eyepiece.position.set(0.1, 0, -2.1); // Relative to main tube (casing position)
+        tube.add(eyepiece);
+        
+        // --- EYEPIECE LENS (BACK) - Now a thin cylinder for better visibility ---
+        const eyepieceLensGeometry = new THREE.CylinderGeometry(0.07, 0.07, 0.01, 16); // Thin cylinder geometry
+        const eyepieceLensMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0x88bbff, // Blue tint
+            metalness: 0.0,
+            roughness: 0.2,
+            opacity: 0.7, // Increased opacity slightly for better visibility
+            transparent: true,
+            clearcoat: 1.0,
+        });
+        const eyepieceLens = new THREE.Mesh(eyepieceLensGeometry, eyepieceLensMaterial);
+        eyepieceLens.rotation.x = Math.PI / 2;
+        // Positioned slightly further out of the casing end for better visibility
+        eyepieceLens.position.set(0, 0, 0.15); 
+        eyepiece.add(eyepieceLens); 
+
+
+        telescope.position.set(0, 0, 0); // Position the whole telescope
+        return telescope;
+    }
+
+    /**
+     * Creates a single planet mesh with its own rotation axis.
+     */
+    function createPlanet(size, color, distance, rotationSpeed) {
+        const geometry = new THREE.SphereGeometry(size, 32, 32);
+        const material = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(color),
+            roughness: 0.8, 
+            metalness: 0.1
+        });
+        const planet = new THREE.Mesh(geometry, material);
+
+        // Place planets much further away now, but larger
+        planet.position.set(distance * 5, 20 + Math.random() * 10, distance * 3); 
+        planet.userData = { rotationSpeed: rotationSpeed }; 
+        return planet;
+    }
+
+    /**
+     * Creates a field of distant stars.
+     */
+    function createStars() {
+        const starGeometry = new THREE.BufferGeometry();
+        const starVertices = [];
+
+        for (let i = 0; i < 5000; i++) {
+            const x = THREE.MathUtils.randFloatSpread(400); 
+            const y = THREE.MathUtils.randFloatSpread(400);
+            const z = THREE.MathUtils.randFloatSpread(400);
+            starVertices.push(x, y, z);
+        }
+
+        starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+        const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.1, sizeAttenuation: true });
+        const starField = new THREE.Points(starGeometry, starMaterial);
+        scene.add(starField);
+        stars.push(starField);
+    }
+
+    /**
+     * Creates a single comet (particle) that moves upwards.
+     */
+    function createComet() {
+        // CHANGED: Use CylinderGeometry for a streaked/tail effect
+        const cometGeometry = new THREE.CylinderGeometry(0.1, 0.05, 1.0, 8); // Larger, elongated comet
+        const cometMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffa040, // More vibrant orange-yellow for impact
+            transparent: true,
+            opacity: 1.0,
+            blending: THREE.AdditiveBlending // Makes it glow
+        });
+        const comet = new THREE.Mesh(cometGeometry, cometMaterial);
+
+        // Random starting position far from the center, below the view
+        const range = 100; // Spread range for comets
+        comet.position.set(
+            THREE.MathUtils.randFloatSpread(range),
+            -50 - Math.random() * 20, // Start well below the scene, further down
+            THREE.MathUtils.randFloatSpread(range)
+        );
+        // Random slight rotation for orientation variety
+        comet.rotation.z = Math.random() * Math.PI; 
+        
+        comet.userData = {
+            spawnTime: Date.now()
+        };
+        scene.add(comet);
+        comets.push(comet);
+    }
+
+    /**
+     * Initializes the Three.js scene, camera, and objects.
+     */
+    function init() {
+        container = document.getElementById('scene-container');
+
+        // FIX: Initialize target vector here to ensure THREE is defined
+        target = new THREE.Vector3(0, 2, 0); // Point the camera looks at and zooms toward
+        
+        // 1. Scene setup
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a0f); 
+
+        // 2. Camera setup
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 5, 10); 
+        camera.lookAt(target); 
+
+        // 3. Renderer setup
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio); 
+        container.appendChild(renderer.domElement);
+
+        // 4. Main Group setup (for scene orbiting)
+        mainGroup = new THREE.Group();
+        scene.add(mainGroup);
+
+        // 5. Add Objects
+        const telescope = createModernTelescope();
+        mainGroup.add(telescope);
+
+        // Create a simple ground plane
+        const floorGeometry = new THREE.PlaneGeometry(20, 20);
+        const floorMaterial = new THREE.MeshStandardMaterial({
+            color: 0x15181e,
+            side: THREE.DoubleSide,
+            roughness: 0.9,
+            metalness: 0.1
+        });
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.rotation.x = Math.PI / 2; 
+        floor.position.y = 0;
+        mainGroup.add(floor);
+
+        // Add Stars to the scene (these remain small background dots)
+        createStars();
+
+        // Add Planets (further away and now larger/more distinct)
+        planets.push(createPlanet(3.0, 0xff6666, 30, 0.01)); // Red planet, larger, faster rotation
+        planets.push(createPlanet(4.5, 0xffff66, -45, 0.007)); // Yellow planet, larger, faster rotation
+        planets.push(createPlanet(3.5, 0x66ccff, 60, 0.009)); // Blue planet, larger, faster rotation
+
+        planets.forEach(planet => scene.add(planet)); 
+
+        // 6. Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2); // Slightly brighter directional light
+        directionalLight.position.set(10, 20, 15);
+        directionalLight.castShadow = true; 
+        scene.add(directionalLight);
+
+        const pointLight = new THREE.PointLight(0xa0a0ff, 0.8, 50); // Brighter point light
+        pointLight.position.set(-10, 15, -10);
+        scene.add(pointLight);
+
+
+        // 7. Event Listeners
+        window.addEventListener('resize', onWindowResize, false);
+        container.addEventListener('mousedown', onMouseDown, false);
+        container.addEventListener('mouseup', onMouseUp, false);
+        container.addEventListener('mousemove', onMouseMove, false);
+        container.addEventListener('wheel', onMouseWheel, false); // ADDED: Mouse wheel for zoom
+        container.addEventListener('touchstart', onTouchStart, false);
+        container.addEventListener('touchend', onTouchEnd, false);
+        container.addEventListener('touchmove', onTouchMove, false);
+
+        // Start the animation loop
+        animate();
+    }
+
+    // --- Event Handlers ---
+
+    function onMouseWheel(event) {
+        event.preventDefault();
+
+        // 1. Get the direction vector from the target to the camera
+        const vector = new THREE.Vector3().subVectors(camera.position, target);
+        
+        // 2. Calculate the change in distance
+        // Scroll down (positive deltaY) zooms out, scroll up (negative deltaY) zooms in
+        const zoomChange = event.deltaY > 0 ? zoomSensitivity : -zoomSensitivity;
+
+        // 3. New distance magnitude
+        let newDistance = vector.length() + zoomChange;
+        
+        // 4. Clamp the new distance to prevent clipping or excessive distance
+        newDistance = Math.max(minZoomDistance, Math.min(maxZoomDistance, newDistance));
+
+        // 5. Normalize the direction vector and scale it by the new distance
+        vector.normalize().multiplyScalar(newDistance);
+
+        // 6. Update camera position relative to the target
+        // camera.position = target + scaled_direction_vector
+        camera.position.copy(target).add(vector);
+
+        // Ensure the camera continues to look at the target point
+        camera.lookAt(target);
+
+        camera.updateProjectionMatrix();
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function onMouseDown(event) {
+        isDragging = true;
+        previousMousePosition.x = event.clientX;
+        previousMousePosition.y = event.clientY;
+    }
+
+    function onMouseUp() {
+        isDragging = false;
+    }
+
+    function onMouseMove(event) {
+        if (!isDragging) return;
+
+        const deltaX = event.clientX - previousMousePosition.x;
+        const deltaY = event.clientY - previousMousePosition.y;
+
+        // Yaw: rotate around Y axis (vertical) - Manual Orbit
+        mainGroup.rotation.y += deltaX * rotationSpeed;
+
+        // Pitch: rotate around X axis (horizontal), clamp to prevent flipping
+        mainGroup.rotation.x += deltaY * rotationSpeed;
+        mainGroup.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, mainGroup.rotation.x));
+
+        previousMousePosition.x = event.clientX;
+        previousMousePosition.y = event.clientY;
+    }
+
+    function onTouchStart(event) {
+        if (event.touches.length === 1) {
+            isDragging = true;
+            previousMousePosition.x = event.touches[0].clientX;
+            previousMousePosition.y = event.touches[0].clientY;
+        }
+    }
+
+    function onTouchEnd() {
+        isDragging = false;
+    }
+
+    function onTouchMove(event) {
+        if (!isDragging || event.touches.length !== 1) return;
+
+        const clientX = event.touches[0].clientX;
+        const clientY = event.touches[0].clientY;
+
+        const deltaX = clientX - previousMousePosition.x;
+        const deltaY = clientY - previousMousePosition.y;
+
+        // Apply rotation logic same as mousemove
+        mainGroup.rotation.y += deltaX * rotationSpeed;
+        mainGroup.rotation.x += deltaY * rotationSpeed;
+        mainGroup.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, mainGroup.rotation.x));
+
+        previousMousePosition.x = clientX;
+        previousMousePosition.y = clientY;
+    }
+
+    // --- Animation Loop ---
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const currentTime = Date.now();
+
+        // 1. Continuous Panning/Scanning (Automatic Rotation on Y-axis)
+        mainGroup.rotation.y += autoRotationSpeed;
+
+        // 2. Rotate planets on their own axis
+        planets.forEach(planet => {
+            planet.rotation.y += planet.userData.rotationSpeed;
+        });
+
+        // 3. Spawn new comets
+        if (currentTime - lastCometSpawnTime > cometSpawnInterval) {
+            createComet();
+            lastCometSpawnTime = currentTime;
+        }
+
+        // 4. Update comet positions and fade them out
+        for (let i = comets.length - 1; i >= 0; i--) {
+            const comet = comets[i];
+            const elapsedTime = currentTime - comet.userData.spawnTime;
+
+            // Move comet upwards
+            comet.position.y += cometSpeed * (cometSpawnInterval / 1000); // Scale by delta time
+
+            // Fade out
+            const fadeProgress = elapsedTime / cometFadeDuration;
+            if (fadeProgress < 1) {
+                comet.material.opacity = 1 - fadeProgress;
+            } else {
+                // Remove comet if fully faded
+                scene.remove(comet);
+                comets.splice(i, 1);
+            }
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    // Start the application when the window loads
+    window.onload = function() {
+        init();
+    };
+
+</script>
+
+</body>
+</html>
