@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D RLC Circuit Simulation</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        /* Custom styles for a clean, dark-themed educational environment */
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Prevent body scroll */
+        }
+        #app {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: #0d1117; /* Dark background */
+        }
+        #ui-overlay {
+            z-index: 10;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            pointer-events: none; /* Allows clicks to pass through to the canvas */
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <!-- UI Overlay for Controls and Indicators -->
+    <div id="ui-overlay" class="p-4 md:p-8">
+        <div class="flex flex-col md:flex-row justify-between items-start">
+            <!-- Indicators -->
+            <div class="bg-gray-800 bg-opacity-70 p-4 rounded-xl shadow-lg w-full md:w-auto mb-4 md:mb-0">
+                <!-- Updated Title for clarity -->
+                <h1 class="text-xl font-bold text-white mb-2">RLC Components (RL Physics)</h1>
+                <div id="status" class="space-y-2">
+                    <div class="flex items-center text-lg text-white">
+                        <div class="w-4 h-4 rounded-full bg-green-500 mr-2"></div>
+                        <span class="font-semibold">Source Voltage ($V_S$):</span> <span id="voltage-display" class="ml-2 font-mono">0.00</span> V
+                    </div>
+                    <div class="flex items-center text-lg text-white">
+                        <div class="w-4 h-4 rounded-full bg-white mr-2"></div>
+                        <span class="font-semibold">Current ($I$):</span> <span id="current-display" class="ml-2 font-mono">0.00</span> A
+                    </div>
+                    <p class="text-sm text-gray-400 mt-2">Drag mouse to change view. Scroll/Pinch to zoom.</p>
+                </div>
+            </div>
+
+            <!-- Controls (Clickable, so pointer-events must be re-enabled) -->
+            <div class="bg-gray-800 bg-opacity-70 p-3 rounded-xl shadow-lg pointer-events-auto">
+                <button id="reset-button" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition duration-200 shadow-md">
+                    Reset & Restart
+                </button>
+            </div>
+        </div>
+    </div>
+    <!-- The 3D Canvas will be appended here by Three.js -->
+</div>
+
+<script>
+    // --- RLC Circuit Constants ---
+    var R = 50;     // Ohms (Resistance)
+    var L = 0.5;    // Henrys (Inductance)
+    var C = 0.005;  // Farads (Capacitance)
+    var V_SOURCE = 12; // Volts (Source Voltage)
+    var TAU = L / R; // Time Constant (Used for RL approximation)
+
+    // Three.js Variables
+    var scene, camera, renderer, clock;
+    var voltageParticle, currentParticle;
+    var circuitSegments = [];
+    var isSimulationRunning = false;
+    var simulationTime = 0;
+    var rotationGroup;
+
+    // New global variables for particle paths
+    var totalCurrentCurve, sourceVoltageCurve; 
+
+    // UI Elements
+    var voltageDisplay = document.getElementById('voltage-display');
+    var currentDisplay = document.getElementById('current-display');
+    var resetButton = document.getElementById('reset-button');
+    var container = document.getElementById('app');
+
+    // --- Physics Functions (Currently using RL DC Transient approximation) ---
+    /**
+     * Calculates the current at time t in an RL circuit during charging.
+     * I(t) = I_max * (1 - e^(-t/tau))
+     * @param {number} t - Time in seconds.
+     * @returns {number} Current in Amperes.
+     */
+    function getCurrent(t) {
+        const I_max = V_SOURCE / R;
+        return I_max * (1 - Math.exp(-t / TAU));
+    }
+
+    /**
+     * Creates a 3D text label using a Canvas texture on a PlaneGeometry.
+     */
+    function createTextLabel(text, position, textColor = '#ffffff', backgroundColor = 'rgba(0,0,0,0.8)') {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        const fontSize = 48;
+        const padding = 10;
+        
+        context.font = `Bold ${fontSize}px Inter, sans-serif`;
+        const metrics = context.measureText(text);
+        
+        canvas.width = metrics.width + padding * 2;
+        canvas.height = fontSize + padding * 2;
+        
+        context.font = `Bold ${fontSize}px Inter, sans-serif`;
+        context.fillStyle = backgroundColor;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        
+        context.fillStyle = textColor;
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+
+        const material = new THREE.MeshBasicMaterial({
+            map: texture,
+            transparent: true,
+            side: THREE.DoubleSide
+        });
+
+        const aspect = canvas.width / canvas.height;
+        const scaleHeight = 2; // Fixed height for visibility
+        const scaleWidth = scaleHeight * aspect;
+
+        const geometry = new THREE.PlaneGeometry(scaleWidth, scaleHeight);
+        const mesh = new THREE.Mesh(geometry, material);
+        
+        mesh.position.copy(position);
+        mesh.position.z += 0.5; // Offset Z for visibility
+
+        return mesh;
+    }
+
+
+    // --- 3D Scene Setup ---
+
+    /**
+     * Creates a 3D line geometry for the wires, based on a set of points.
+     */
+    function createWire(points, color = 0x8b4513) {
+        const curve = new THREE.CatmullRomCurve3(points);
+        const geometry = new THREE.TubeGeometry(curve, 64, 0.2, 8, false);
+        const material = new THREE.MeshPhongMaterial({ color: color });
+        const mesh = new THREE.Mesh(geometry, material);
+        return { mesh, curve, length: curve.getLength() };
+    }
+
+    /**
+     * Creates the main circuit geometry and initializes the particles.
+     */
+    function createCircuit() {
+        circuitSegments.length = 0;
+
+        // Clean up previous meshes from the rotation group
+        if (rotationGroup) {
+            while(rotationGroup.children.length > 0){
+                rotationGroup.remove(rotationGroup.children[0]);
+            }
+        } else {
+             rotationGroup = new THREE.Group();
+             scene.add(rotationGroup);
+        }
+
+        // --- Component Dimensions/Positioning for Rectangular Layout ---
+        const X_MIN_BOUND = -10;
+        const X_MAX_BOUND = 10;
+        const Y_MIN_BOUND = -8;
+        const Y_MAX_BOUND = 8;
+        const Z = 0;
+        const wireColor = 0x8b4513; 
+
+        // --- Battery/Source (V) ---
+        const sourceWidth = 4;
+        const sourceHeight = 1;
+        const sourceX = X_MAX_BOUND - sourceWidth / 2;
+        const sourceY = Y_MIN_BOUND + sourceHeight + 1;
+        const sourcePos = new THREE.Vector3(sourceX, sourceY, Z);
+        const sourceGeo = new THREE.BoxGeometry(sourceWidth, sourceHeight, 1);
+        const sourceMat = new THREE.MeshPhongMaterial({ color: 0x888888 });
+        const battery = new THREE.Mesh(sourceGeo, sourceMat);
+        battery.position.copy(sourcePos);
+        rotationGroup.add(battery);
+
+        const S_POS = new THREE.Vector3(sourcePos.x + sourceWidth / 2, sourceY, Z); // Positive terminal
+        const S_NEG = new THREE.Vector3(sourcePos.x - sourceWidth / 2, sourceY, Z); // Negative terminal
+        
+        // Battery terminals
+        const terminalGeo = new THREE.CylinderGeometry(0.1, 0.1, 1.2, 8);
+        const posMat = new THREE.MeshPhongMaterial({ color: 0xcc0000 });
+        const negMat = new THREE.MeshPhongMaterial({ color: 0x444444 });
+
+        const posTerminal = new THREE.Mesh(terminalGeo, posMat);
+        posTerminal.position.set(S_POS.x, S_POS.y, S_POS.z + 0.6);
+        posTerminal.rotation.x = Math.PI / 2;
+        rotationGroup.add(posTerminal);
+
+        const negTerminal = new THREE.Mesh(terminalGeo, negMat);
+        negTerminal.position.set(S_NEG.x, S_NEG.y, S_NEG.z + 0.6);
+        negTerminal.rotation.x = Math.PI / 2;
+        rotationGroup.add(negTerminal);
+
+        // Define Voltage Path (S_NEG to S_POS)
+        // This curve will be a straight line for the voltage particle oscillation
+        sourceVoltageCurve = new THREE.LineCurve3(S_NEG, S_POS);
+        window.sourceVoltageCurveLength = sourceVoltageCurve.getLength();
+
+
+        // --- Resistor (R) - The Green Zigzag (Bottom Left) ---
+        const resistorWidth = 6;
+        const resistorY = Y_MIN_BOUND + 1;
+        const resistorX = X_MIN_BOUND + resistorWidth / 2 + 1;
+        
+        const R_START = new THREE.Vector3(resistorX - resistorWidth / 2, resistorY, Z);
+        const R_END = new THREE.Vector3(resistorX + resistorWidth / 2, resistorY, Z);
+        
+        const resistorPoints = [
+            R_START,
+            new THREE.Vector3(resistorX - resistorWidth / 4, resistorY + 0.5, Z),
+            new THREE.Vector3(resistorX, resistorY - 0.5, Z),
+            new THREE.Vector3(resistorX + resistorWidth / 4, resistorY + 0.5, Z),
+            R_END
+        ];
+        const resistorCurve = new THREE.CatmullRomCurve3(resistorPoints);
+        const resistorGeo = new THREE.TubeGeometry(resistorCurve, 32, 0.25, 8, false);
+        const resistorMat = new THREE.MeshPhongMaterial({ color: 0x22c55e });
+        const resistorMesh = new THREE.Mesh(resistorGeo, resistorMat);
+        rotationGroup.add(resistorMesh);
+        circuitSegments.push({ type: 'R', curve: resistorCurve, length: resistorCurve.getLength() });
+
+        // --- Inductor (L) - The Coil (Top Left) ---
+        const coilRadius = 2.5;
+        const coilTurns = 10;
+        const coilLength = 8;
+        const coilY = Y_MAX_BOUND - 1;
+        const coilX = X_MIN_BOUND + coilLength / 2 + 1;
+        
+        const L_START = new THREE.Vector3(coilX - coilLength / 2, coilY, Z);
+        const L_END = new THREE.Vector3(coilX + coilLength / 2, coilY, Z);
+
+        const coilPoints = [];
+        for (let i = 0; i <= 360 * coilTurns; i += 10) {
+            const angle = i * Math.PI / 180;
+            const x = L_START.x + (angle / (2 * Math.PI)) * (coilLength / coilTurns);
+            const y = L_START.y + coilRadius * Math.cos(angle);
+            const z = Z + coilRadius * Math.sin(angle);
+            coilPoints.push(new THREE.Vector3(x, y, z));
+        }
+
+        const coilCurve = new THREE.CatmullRomCurve3(coilPoints);
+        const coilGeo = new THREE.TubeGeometry(coilCurve, 128, 0.15, 8, false);
+        const coilMat = new THREE.MeshPhongMaterial({ color: 0xcc9933 });
+        const coilMesh = new THREE.Mesh(coilGeo, coilMat);
+        rotationGroup.add(coilMesh);
+        circuitSegments.push({ type: 'L', curve: coilCurve, length: coilCurve.getLength() });
+        
+        
+        // --- Capacitor (C) - Parallel Plates (Top Right) ---
+        const capacitorGap = 0.5;
+        const plateSize = 2.0;
+        const plateThickness = 0.1;
+
+        const capacitorCenter = new THREE.Vector3(
+            (X_MAX_BOUND + X_MIN_BOUND) / 2 + 5,
+            Y_MAX_BOUND - 1,
+            Z
+        );
+
+        const C_PLATE_POS = new THREE.Vector3(capacitorCenter.x + capacitorGap / 2, capacitorCenter.y, Z);
+        const C_PLATE_NEG = new THREE.Vector3(capacitorCenter.x - capacitorGap / 2, capacitorCenter.y, Z);
+
+        const C_START = new THREE.Vector3(C_PLATE_NEG.x - 2, C_PLATE_NEG.y, Z);
+        const C_END = new THREE.Vector3(C_PLATE_POS.x + 2, C_PLATE_POS.y, Z);
+
+        const plateGeo = new THREE.BoxGeometry(plateThickness, plateSize, plateSize * 0.5);
+        const capMat = new THREE.MeshPhongMaterial({ color: 0x60a5fa, transparent: true, opacity: 0.8 });
+
+        const platePos = new THREE.Mesh(plateGeo, capMat);
+        platePos.position.copy(C_PLATE_POS);
+        rotationGroup.add(platePos);
+
+        const plateNeg = new THREE.Mesh(plateGeo, capMat);
+        plateNeg.position.copy(C_PLATE_NEG);
+        rotationGroup.add(plateNeg);
+        circuitSegments.push({ type: 'C', mesh: platePos, length: 0 });
+
+
+        // --- Add Labels ---
+        // Resistor (R) Label
+        const labelRPos = new THREE.Vector3(resistorX, resistorY + 2.5, Z);
+        const labelR = createTextLabel("R = 50Ω", labelRPos, '#22c55e');
+        rotationGroup.add(labelR);
+
+        // Inductor (L) Label
+        const labelLPos = new THREE.Vector3(coilX, coilY - 3, Z);
+        const labelL = createTextLabel("L = 0.5H", labelLPos, '#cc9933');
+        rotationGroup.add(labelL);
+
+        // Capacitor (C) Label
+        const labelCPos = new THREE.Vector3(capacitorCenter.x, capacitorCenter.y + plateSize + 0.5, Z);
+        const labelC = createTextLabel(`C = ${C * 1000}mF`, labelCPos, '#60a5fa'); 
+        rotationGroup.add(labelC);
+        
+        
+        // --- WIRING PATHS ---
+
+        // Corner Points
+        const P_TL = new THREE.Vector3(X_MIN_BOUND, Y_MAX_BOUND, Z);
+        const P_BL = new THREE.Vector3(X_MIN_BOUND, Y_MIN_BOUND, Z);
+        const P_BR = new THREE.Vector3(X_MAX_BOUND, Y_MIN_BOUND, Z);
+        const P_TR = new THREE.Vector3(X_MAX_BOUND, Y_MAX_BOUND, Z);
+        
+        // 1. Bottom Right Wire Segment (S_POS to R_END)
+        const W1_S_POS_TO_R_END_POINTS = [
+            S_POS,
+            new THREE.Vector3(S_POS.x, Y_MIN_BOUND, Z),
+            P_BR,
+            P_BR,
+            new THREE.Vector3(R_END.x, Y_MIN_BOUND, Z),
+            R_END
+        ];
+        const W1_S_POS_TO_R_END = createWire(W1_S_POS_TO_R_END_POINTS, wireColor);
+        rotationGroup.add(W1_S_POS_TO_R_END.mesh);
+        circuitSegments.push({ type: 'W', curve: W1_S_POS_TO_R_END.curve, length: W1_S_POS_TO_R_END.length });
+        
+        // 2. Left Vertical Wire Segment (R_START to L_START)
+        const W2_R_START_TO_L_START_POINTS = [
+            R_START,
+            new THREE.Vector3(R_START.x, Y_MIN_BOUND, Z),
+            P_BL,
+            P_BL,
+            P_TL,
+            P_TL,
+            L_START
+        ];
+        const W2_R_START_TO_L_START = createWire(W2_R_START_TO_L_START_POINTS, wireColor);
+        rotationGroup.add(W2_R_START_TO_L_START.mesh);
+        circuitSegments.push({ type: 'W', curve: W2_R_START_TO_L_START.curve, length: W2_R_START_TO_L_START.length });
+
+        // 3a. Top Left Wire Segment (L_END to C_START)
+        const W3a_L_END_TO_C_START_POINTS = [
+            L_END,
+            L_END,
+            new THREE.Vector3(C_START.x, L_END.y, Z),
+            C_START
+        ];
+        const W3a_L_END_TO_C_START = createWire(W3a_L_END_TO_C_START_POINTS, wireColor);
+        rotationGroup.add(W3a_L_END_TO_C_START.mesh);
+        circuitSegments.push({ type: 'W', curve: W3a_L_END_TO_C_START.curve, length: W3a_L_END_TO_C_START.length });
+
+        // 3b. Top Right Wire Segment (C_END to S_NEG)
+        const W3b_C_END_TO_S_NEG_POINTS = [
+            C_END,
+            new THREE.Vector3(C_END.x, Y_MAX_BOUND, Z),
+            P_TR,
+            P_TR,
+            new THREE.Vector3(S_NEG.x, Y_MAX_BOUND, Z),
+            S_NEG
+        ];
+        const W3b_C_END_TO_S_NEG = createWire(W3b_C_END_TO_S_NEG_POINTS, wireColor);
+        rotationGroup.add(W3b_C_END_TO_S_NEG.mesh);
+        circuitSegments.push({ type: 'W', curve: W3b_C_END_TO_S_NEG.curve, length: W3b_C_END_TO_S_NEG.length });
+        
+        
+        // --- Concatenate all curves for Current particle path (Electron Flow: S_NEG -> C -> L -> R -> S_POS) ---
+        totalCurrentCurve = new THREE.CurvePath();
+        
+        // 1. S_NEG -> C_END (Reversed W3b)
+        const reversedW3b = W3b_C_END_TO_S_NEG.curve.clone();
+        reversedW3b.points.reverse();
+        totalCurrentCurve.add(reversedW3b);
+        
+        // 2. C gap (C_END -> C_START) - Straight line across the capacitor plates
+        const capWire = new THREE.LineCurve3(C_END, C_START);
+        totalCurrentCurve.add(capWire);
+        
+        // 3. C_START -> L_END (Reversed W3a)
+        const reversedW3a = W3a_L_END_TO_C_START.curve.clone();
+        reversedW3a.points.reverse();
+        totalCurrentCurve.add(reversedW3a);
+
+        // 4. L (L_START -> L_END)
+        totalCurrentCurve.add(coilCurve);
+        
+        // 5. L_START -> R_START (Reversed W2)
+        const reversedW2 = W2_R_START_TO_L_START.curve.clone();
+        reversedW2.points.reverse();
+        totalCurrentCurve.add(reversedW2);
+
+        // 6. R (R_START -> R_END)
+        totalCurrentCurve.add(resistorCurve);
+        
+        // 7. R_END -> S_POS (Reversed W1)
+        const reversedW1 = W1_S_POS_TO_R_END.curve.clone();
+        reversedW1.points.reverse();
+        totalCurrentCurve.add(reversedW1);
+
+        window.totalCurrentLength = totalCurrentCurve.getLength();
+
+
+        // --- Particles ---
+        const particleGeo = new THREE.SphereGeometry(0.3, 16, 16);
+        const Z_OFFSET = 0.3;
+
+        // Current Particle (White) - Uses the full circuit path
+        const currentMat = new THREE.MeshBasicMaterial({ color: 0xffffff, emissive: 0xffffff });
+        currentParticle = new THREE.Mesh(particleGeo, currentMat);
+        currentParticle.position.copy(S_NEG).setZ(S_NEG.z + Z_OFFSET);
+        rotationGroup.add(currentParticle);
+        currentParticle.userData.t = 0;
+
+        // Voltage Particle (Green) - Uses the straight line across the source
+        const voltageMat = new THREE.MeshBasicMaterial({ color: 0x10b981, emissive: 0x10b981 });
+        voltageParticle = new THREE.Mesh(particleGeo, voltageMat);
+        voltageParticle.position.copy(S_NEG).setZ(S_NEG.z + Z_OFFSET);
+        rotationGroup.add(voltageParticle);
+        voltageParticle.userData.t = 0;
+    }
+
+
+    // --- Three.js Initialization ---
+    function init() {
+        // 1. Setup Scene/Renderer/Camera (should only happen once)
+        if (!scene) {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000); 
+
+            const aspectRatio = window.innerWidth / window.innerHeight;
+            camera = new THREE.PerspectiveCamera(50, aspectRatio, 0.1, 1000);
+            camera.position.set(0, 0, 20);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            container.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 5); 
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            directionalLight.position.set(50, 50, 50);
+            scene.add(directionalLight);
+
+            clock = new THREE.Clock();
+            
+            // Initial listeners setup
+            window.addEventListener('resize', onWindowResize, false);
+            resetButton.addEventListener('click', resetSimulation);
+            setupControls();
+        } 
+        
+        // 2. Create the circuit (handles rotationGroup creation/cleanup internally)
+        createCircuit();
+
+        // 3. Start the simulation
+        resetSimulation();
+        if (!window.animationRunning) {
+            animate();
+            window.animationRunning = true;
+        }
+    }
+
+    // --- Interactivity and Controls ---
+    var isDragging = false;
+    var previousMousePosition = { x: 0, y: 0 };
+    var initialTouchDistance = 0;
+    
+    /**
+     * Adjusts the camera's Z position for zooming, clamping it between min/max limits.
+     */
+    function updateCameraZoom(delta) {
+        const zoomFactor = delta * 0.01;
+        let newZ = camera.position.z + zoomFactor;
+        newZ = THREE.MathUtils.clamp(newZ, 10, 50);
+        camera.position.z = newZ;
+        camera.updateProjectionMatrix();
+    }
+
+
+    function setupControls() {
+        const canvas = renderer.domElement;
+
+        // --- Rotation (Drag) Controls ---
+        canvas.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDragging || !rotationGroup) return;
+            const deltaX = e.clientX - previousMousePosition.x;
+            const deltaY = e.clientY - previousMousePosition.y;
+
+            rotationGroup.rotation.y += deltaX * 0.005;
+            rotationGroup.rotation.x += deltaY * 0.005;
+
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+
+        // --- Zoom (Wheel) Controls ---
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            updateCameraZoom(e.deltaY);
+        });
+
+
+        // --- Touch Controls (Rotation and Pinch Zoom) ---
+        canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                isDragging = true;
+                previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                initialTouchDistance = 0;
+            } else if (e.touches.length === 2) {
+                isDragging = false;
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                initialTouchDistance = Math.sqrt(dx * dx + dy * dy);
+            }
+        });
+
+        canvas.addEventListener('touchend', () => {
+            isDragging = false;
+            initialTouchDistance = 0;
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            
+            if (e.touches.length === 2) {
+                // Pinch Zoom Logic
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const currentTouchDistance = Math.sqrt(dx * dx + dy * dy);
+
+                if (initialTouchDistance > 0) {
+                    const zoomDelta = initialTouchDistance - currentTouchDistance; 
+                    updateCameraZoom(-zoomDelta * 0.1); 
+                    initialTouchDistance = currentTouchDistance;
+                }
+            } else if (isDragging && e.touches.length === 1 && rotationGroup) {
+                // Single-finger Rotation Logic
+                const deltaX = e.touches[0].clientX - previousMousePosition.x;
+                const deltaY = e.touches[0].clientY - previousMousePosition.y;
+
+                rotationGroup.rotation.y += deltaX * 0.005;
+                rotationGroup.rotation.x += deltaY * 0.005;
+
+                previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+        });
+    }
+
+    function onWindowResize() {
+        if (camera && renderer) {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    }
+
+    function resetSimulation() {
+        simulationTime = 0;
+        if (voltageParticle) voltageParticle.userData.t = 0;
+        if (currentParticle) currentParticle.userData.t = 0;
+        
+        isSimulationRunning = true;
+        if (rotationGroup) {
+            rotationGroup.rotation.set(0, 0, 0);
+        }
+    }
+
+    // --- Animation Loop ---
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const delta = clock.getDelta();
+
+        if (isSimulationRunning) {
+            simulationTime += delta;
+
+            if (currentParticle && voltageParticle && totalCurrentCurve && window.totalCurrentLength > 0) {
+                
+                // --- 1. Current Update (White Particle) ---
+                const currentAmp = getCurrent(simulationTime);
+                // Current particle speed is proportional to the current (I)
+                const currentSpeed = currentAmp * 10; 
+
+                currentParticle.userData.t += delta * currentSpeed;
+                if (currentParticle.userData.t >= window.totalCurrentLength) {
+                    currentParticle.userData.t %= window.totalCurrentLength; // Loop
+                }
+                const currentPoint = totalCurrentCurve.getPointAt(currentParticle.userData.t / window.totalCurrentLength);
+                // Offset Z slightly so it doesn't collide with the voltage particle path
+                currentParticle.position.copy(currentPoint).setZ(currentPoint.z + 0.3);
+
+
+                // --- 2. Voltage Update (Green Particle) ---
+                // Voltage particle oscillates across the source terminals (S_NEG to S_POS)
+                // Use a periodic function to make it move back and forth (simulating probe movement)
+                const V_L = V_SOURCE - currentAmp * R; // Voltage across L (drops from V_S to 0)
+                
+                // The speed of the voltage particle movement is fixed for now, indicating constant V_Source
+                // The position (t) oscillates between 0 and 1 using Math.sin
+                const oscillationSpeed = 1.0; 
+                let voltageT = (Math.sin(simulationTime * oscillationSpeed) + 1) / 2; // Value between 0 and 1
+                
+                const voltagePoint = sourceVoltageCurve.getPointAt(voltageT);
+                // Offset Z slightly so it doesn't collide with the current particle path
+                voltageParticle.position.copy(voltagePoint).setZ(voltagePoint.z + 0.6); 
+
+                
+                // --- 3. UI Update ---
+                voltageDisplay.textContent = V_SOURCE.toFixed(2);
+                currentDisplay.textContent = currentAmp.toFixed(2);
+
+                // 4. Stop when steady state is reached (approx 5*TAU)
+                if (simulationTime > 5 * TAU) {
+                     isSimulationRunning = false;
+                     currentDisplay.textContent = (V_SOURCE / R).toFixed(2);
+                     voltageDisplay.textContent = V_SOURCE.toFixed(2);
+                }
+            }
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    // Start the whole application
+    window.onload = init;
+
+</script>
+</body>
+</html>
