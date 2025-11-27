@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Potentiometer Simulation</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: #ccc; /* Changed text color for better contrast on black */
+            font-size: 14px;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .label {
+            position: absolute;
+            background-color: rgba(255, 255, 255, 0.7); /* Semi-transparent white background */
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 12px;
+            color: #000;
+            white-space: nowrap;
+            pointer-events: none; /* Allows mouse events to pass through to the canvas */
+            transform: translate(-50%, -100%); /* Adjust position to hover above and center */
+        }
+        /* Specific colors for labels, matching the reference image's arrows */
+        .label.ground { background-color: rgba(0, 0, 0, 0.7); color: #fff; }
+        .label.output { background-color: rgba(255, 0, 0, 0.7); color: #fff; }
+        .label.vcc { background-color: rgba(0, 191, 255, 0.7); color: #fff; }
+
+    </style>
+</head>
+<body>
+    <div id="info">
+        <p class="font-bold text-lg">Potentiometer Cutaway Model (3D)</p>
+        <p class="text-sm">Drag to rotate the view. Scroll to zoom.</p>
+    </div>
+
+    <!-- HTML elements for labels --><div id="labels-container">
+        <div id="label-ground" class="label ground">Ground</div>
+        <div id="label-output" class="label output">Output</div>
+        <div id="label-vcc" class="label vcc">VCC</div>
+    </div>
+
+    <script>
+        // --- SCENE SETUP ---
+        let scene, camera, renderer, controls;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        // Create a Vector3 to store the screen position of 3D points
+        const vector = new THREE.Vector3();
+        const labelGroundElem = document.getElementById('label-ground');
+        const labelOutputElem = document.getElementById('label-output');
+        const labelVccElem = document.getElementById('label-vcc');
+
+        // Store the Mesh objects for the terminals
+        let terminalMeshes = [];
+        
+        // Define the content ID for the diagram image (used for texture loading)
+        // This is the direct path for the uploaded asset.
+        const diagramImageId = 'uploaded:image_ec319d.png-acf36f27-9514-44a9-a843-e646eea60617';
+
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000); // Black background
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
+            camera.position.set(0, 7, 7);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(width, height);
+            // *** Set output encoding to handle sRGB textures correctly ***
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            document.body.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 10, 7);
+            scene.add(directionalLight);
+
+            // Controls (User Interaction)
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; // smooth rotation
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 5;
+            controls.maxDistance = 20;
+
+            // Create the Potentiometer and diagrams
+            createPotentiometer();
+            addDiagrams();
+
+            // Handle window resizing
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Start the animation loop
+            animate();
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            positionLabels(); // Recalculate label positions on resize
+        }
+
+        // --- POTENTIOMETER MATERIALS ---
+        const greyMetal = new THREE.MeshPhongMaterial({ color: 0xcccccc, shininess: 80, flatShading: false });
+        const whitePlastic = new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 50, transparent: true, opacity: 0.9 });
+        const resistiveTrack = new THREE.MeshPhongMaterial({ color: 0xcc3333, shininess: 100 });
+        const brownBoard = new THREE.MeshPhongMaterial({ color: 0x8b4513, shininess: 30 });
+        const terminalMetal = new THREE.MeshPhongMaterial({ color: 0xaaaaaa, shininess: 100 });
+        const blackOutline = new THREE.LineBasicMaterial({ color: 0x000000 });
+
+        // --- POTENTIOMETER GEOMETRY CREATION ---
+
+        function createPotentiometer() {
+            const potGroup = new THREE.Group();
+            const housingRadius = 4;
+            const housingHeight = 1.5;
+            const boardThickness = 0.3;
+            const boardRadius = 4.5; // Radius from center to outer edge of board
+            const legLength = 2;
+            const legRadius = 0.3;
+
+            // 1. Main Housing (Sliced Cylinder)
+            const housingGeometry = new THREE.CylinderGeometry(housingRadius, housingRadius, housingHeight, 64, 1, false, 0, Math.PI * 1.5);
+            const housing = new THREE.Mesh(housingGeometry, greyMetal);
+            housing.rotation.y = Math.PI * 0.25; // Rotate to align the cutaway
+            housing.position.y = housingHeight / 2;
+            potGroup.add(housing);
+
+            // 2. Shaft (Top Control Rod)
+            const shaftRadius = 0.8;
+            const shaftHeight = 5; 
+            const shaftGeometry = new THREE.CylinderGeometry(shaftRadius, shaftRadius, shaftHeight, 16);
+            const shaft = new THREE.Mesh(shaftGeometry, greyMetal);
+            shaft.position.y = housingHeight + shaftHeight / 2 - 0.2;
+            potGroup.add(shaft);
+
+            // 3. Mounting Threads (Small cylinder with many segments)
+            const threadHeight = 1;
+            const threadGeometry = new THREE.CylinderGeometry(shaftRadius + 0.2, shaftRadius + 0.2, threadHeight, 32);
+            const threads = new THREE.Mesh(threadGeometry, greyMetal);
+            threads.position.y = housingHeight + threadHeight / 2 - 0.2;
+            potGroup.add(threads);
+
+            // 4. White/Grey Inner Ring and Cap (The moving elements)
+            const innerRingRadius = housingRadius - 0.2;
+            const innerRingGeometry = new THREE.RingGeometry(1, innerRingRadius, 64, 1, 0, Math.PI * 2);
+            const innerRing = new THREE.Mesh(innerRingGeometry, whitePlastic);
+            innerRing.rotation.x = Math.PI / 2;
+            innerRing.position.y = housingHeight - 0.05;
+            potGroup.add(innerRing);
+            
+            // White Plastic Layer (Below the cap)
+            const plasticLayerHeight = 0.5;
+            const plasticLayerGeometry = new THREE.CylinderGeometry(innerRingRadius, innerRingRadius, plasticLayerHeight, 64, 1, false, 0, Math.PI * 2);
+            const plasticLayer = new THREE.Mesh(plasticLayerGeometry, whitePlastic);
+            plasticLayer.position.y = housingHeight - plasticLayerHeight / 2 - 0.2;
+            potGroup.add(plasticLayer);
+
+            // 5. Resistive Track (The Red Element) - Visible in the cutaway
+            const trackThickness = 0.2;
+            const trackGeometry = new THREE.RingGeometry(1.5, innerRingRadius - 0.2, 64, 1, 0, Math.PI * 1.5);
+            const track = new THREE.Mesh(trackGeometry, resistiveTrack);
+            track.rotation.x = Math.PI / 2;
+            track.rotation.z = Math.PI * 0.25; // Rotate to align with cutaway
+            track.position.y = housingHeight / 2 - trackThickness - 0.5;
+            potGroup.add(track);
+
+            // 6. Terminal Board (The Brown Wedge)
+            const shape = new THREE.Shape();
+            shape.moveTo(0, 0);
+            shape.lineTo(boardRadius, 0);
+            shape.absarc(0, 0, boardRadius, 0, -Math.PI / 4, true); 
+            shape.lineTo(0, 0);
+
+            const extrudeSettings = {
+                steps: 1,
+                depth: boardThickness,
+                bevelEnabled: false,
+            };
+
+            const boardGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            const board = new THREE.Mesh(boardGeometry, brownBoard);
+            board.rotation.x = Math.PI / 2; // Lay flat
+            board.rotation.z = Math.PI * 0.5 + Math.PI / 8; // Adjust orientation
+            board.position.set(-boardThickness / 2, -0.2, boardThickness / 2); // Position below the main body
+            potGroup.add(board);
+
+            // 7. Terminals (3 Legs)
+            // Helper function to create a terminal leg and position it on the board
+            function createLeg(angleRad) {
+                const legGroup = new THREE.Group();
+                const legGeo = new THREE.CylinderGeometry(legRadius * 0.6, legRadius * 0.6, legLength, 8);
+                const leg = new THREE.Mesh(legGeo, terminalMetal);
+                leg.position.y = -legLength / 2; // Bottom half of leg extends down
+                legGroup.add(leg);
+
+                // Calculate position on the board's outer edge, adjusting for the board's rotation and position
+                const boardRotationZ = Math.PI * 0.5 + Math.PI / 8;
+                const globalAngle = boardRotationZ + angleRad; // Add relative angle to board's base rotation
+
+                // Position on the outer edge of the *visual* brown board, not just the abstract shape
+                const terminalOffsetX = boardRadius * Math.cos(globalAngle);
+                const terminalOffsetZ = boardRadius * Math.sin(globalAngle);
+
+                // Adjust for the board's overall position
+                legGroup.position.x = terminalOffsetX + board.position.x;
+                legGroup.position.z = terminalOffsetZ + board.position.z;
+
+                // Position the leg's top surface flush with the bottom of the board
+                legGroup.position.y = board.position.y - boardThickness / 2; 
+
+                return legGroup;
+            }
+            
+            // --- ADJUSTED TERMINAL ANGLES FOR EQUAL SPACING ---
+            const totalAngleSpan = Math.PI / 4 - Math.PI / 16; // From 11.25deg to 45deg = 33.75 deg
+            const angleBetween = totalAngleSpan / 2; // For 3 terminals, 2 gaps
+
+            const terminalAngles = [
+                -Math.PI / 16,                                    // Terminal 1 (start) - VCC
+                -Math.PI / 16 - angleBetween,                     // Terminal 2 (middle) - Output
+                -Math.PI / 16 - (2 * angleBetween)                // Terminal 3 (end) - Ground
+            ];
+
+            terminalMeshes = []; // Reset the array
+            terminalAngles.forEach(angle => {
+                const leg = createLeg(angle);
+                potGroup.add(leg);
+                terminalMeshes.push(leg); // Store the leg group for label positioning
+            });
+            
+            // 8. Wiper Arm Connection (The thin metal strip)
+            const armThickness = 0.1;
+            const armLength = 3;
+            const armGeometry = new THREE.BoxGeometry(armLength, armThickness, armThickness);
+            const wiperArm = new THREE.Mesh(armGeometry, terminalMetal);
+
+            wiperArm.position.set(armLength / 2, housingHeight / 2 - 0.2, 0);
+            wiperArm.rotation.y = Math.PI / 4; // Start angle
+            potGroup.add(wiperArm);
+            
+            // Add a small cylinder at the end of the arm representing the contact point (wiper)
+            const wiperGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.2, 8);
+            const wiper = new THREE.Mesh(wiperGeo, resistiveTrack);
+            wiper.position.set(armLength, 0, 0);
+            wiperArm.add(wiper);
+
+
+            scene.add(potGroup);
+            
+            // Store the wiper arm for rotation in the animate loop
+            window.wiperArm = wiperArm;
+        }
+
+        // --- ADD DIAGRAMS FUNCTION (REVERTED to THREE.TextureLoader) ---
+        function addDiagrams() {
+            const textureLoader = new THREE.TextureLoader();
+            // Explicitly set crossOrigin
+            textureLoader.setCrossOrigin('anonymous');
+            
+            const maxRetries = 3;
+            let attempt = 0;
+
+            function loadTextureWithRetry() {
+                attempt++;
+                
+                textureLoader.load(
+                    diagramImageId,
+                    // onLoad callback
+                    function(texture) {
+                        try {
+                            texture.encoding = THREE.LinearEncoding; 
+                            
+                            const planeWidth = 10;
+                            const planeHeight = 5; 
+                            
+                            const planeGeometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
+                            const planeMaterial = new THREE.MeshBasicMaterial({ 
+                                map: texture, 
+                                transparent: true, 
+                                side: THREE.DoubleSide 
+                            });
+
+                            const diagramPlane = new THREE.Mesh(planeGeometry, planeMaterial);
+                            
+                            // Position the diagram plane floating to the left of the main model
+                            diagramPlane.position.set(-10, 3, 0);
+                            diagramPlane.rotation.y = Math.PI / 6; 
+                            
+                            scene.add(diagramPlane);
+                        } catch (e) {
+                            console.error('Error creating diagram mesh in Three.js on load:', e.message || 'Unknown error.');
+                            retryLogic(); // Retry if mesh creation fails after texture is loaded
+                        }
+                    }, 
+                    // onProgress callback (unused)
+                    undefined, 
+                    // onError callback
+                    function(error) {
+                        console.error('Error loading diagram texture on attempt', attempt, ':', error.message || 'TextureLoader failed to fetch or decode.');
+                        retryLogic();
+                    }
+                );
+            }
+            
+            function retryLogic() {
+                 if (attempt < maxRetries) {
+                    const delay = Math.pow(2, attempt) * 1000;
+                    console.warn(`Retrying texture load in ${delay / 1000} seconds...`);
+                    setTimeout(loadTextureWithRetry, delay);
+                } else {
+                    console.error('Max retries reached. The schematic diagram might not be visible.');
+                }
+            }
+
+            loadTextureWithRetry();
+        }
+
+
+        // --- LABEL POSITIONING FUNCTION ---
+        function positionLabels() {
+            if (terminalMeshes.length === 3) {
+                // Terminal indices based on angular position (rightmost to leftmost):
+                // terminalMeshes[0] (Rightmost) -> VCC
+                // terminalMeshes[1] (Middle) -> Output
+                // terminalMeshes[2] (Leftmost) -> Ground
+                updateLabelPosition(terminalMeshes[2], labelGroundElem); // Ground (Leftmost)
+                updateLabelPosition(terminalMeshes[1], labelOutputElem); // Output (Middle)
+                updateLabelPosition(terminalMeshes[0], labelVccElem);    // VCC (Rightmost)
+            }
+        }
+
+        function updateLabelPosition(object3D, htmlElement) {
+            // Get the world position of the 3D object
+            object3D.updateWorldMatrix(true, false);
+            vector.setFromMatrixPosition(object3D.matrixWorld);
+
+            // Project the 3D position to 2D screen coordinates
+            vector.project(camera);
+
+            const x = (vector.x * .5 + .5) * window.innerWidth;
+            const y = (-vector.y * .5 + .5) * window.innerHeight;
+
+            htmlElement.style.left = `${x}px`;
+            htmlElement.style.top = `${y}px`;
+            htmlElement.style.display = 'block'; // Ensure it's visible
+        }
+
+        // --- ANIMATION LOOP ---
+        let angle = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Optional subtle animation to show the wiper movement
+            if (window.wiperArm) {
+                // Animate the wiper arm slightly back and forth
+                angle = 0.5 * Math.sin(Date.now() * 0.0005);
+                window.wiperArm.rotation.y = Math.PI / 4 + angle;
+            }
+
+            controls.update(); // only required if controls.enableDamping = true, or if controls.autoRotate = true
+            renderer.render(scene, camera);
+            positionLabels(); // Update label positions on each frame
+        }
+
+        window.onload = function() {
+            init();
+        }
+    </script>
+</body>
+</html>
