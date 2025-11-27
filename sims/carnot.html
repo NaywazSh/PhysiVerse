@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carnot Cycle 3D Simulation</title>
+    <!-- Load Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Three.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Load OrbitControls for camera interaction -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+        }
+        #scene-container {
+            width: 100%;
+            height: 80vh;
+            background-color: #1f2937; /* Dark background for 3D scene */
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            margin-top: 1rem;
+        }
+        canvas {
+            display: block;
+        }
+        .control-panel {
+            padding: 1rem;
+            width: 100%;
+            max-width: 600px;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+        }
+        button {
+            transition: all 0.2s;
+        }
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .process-info {
+            height: 3rem;
+            text-align: center;
+            font-weight: 600;
+            color: #1f2937;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="p-4 w-full max-w-4xl">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">Carnot Cycle Simulation</h1>
+        <div id="process-info" class="process-info">Ready to start.</div>
+    </div>
+    
+    <div id="scene-container">
+        <!-- Three.js renderer will append the canvas here -->
+    </div>
+
+    <div class="control-panel">
+        <button id="start-btn" onclick="startCycle()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
+            Start Cycle
+        </button>
+        <button id="next-btn" onclick="nextStep()" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg" disabled>
+            Next Step (0/4)
+        </button>
+        <button id="reset-btn" onclick="resetSimulation()" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
+            Reset
+        </button>
+    </div>
+
+    <script>
+        // --- Firebase Globals (Required but not used for this physics simulation) ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        // The simulation does not require persistent data or auth, so the Firebase initialization is omitted.
+        // --------------------------------------------------------------------------
+        
+        // --- 3D Scene Variables ---
+        let scene, camera, renderer, controls;
+        let piston, cylinder, gasVolume, pvCurve;
+
+        // --- Simulation State ---
+        let currentStep = 0; // 0: Start, 1: 1->2, 2: 2->3, 3: 3->4, 4: 4->1, 5: End
+        let isAnimating = false;
+        let animationProgress = 0;
+        const ANIMATION_DURATION = 120; // Frames for one transition
+
+        // Simplified, representative states for the simulation (V: Volume, H: Piston Height, T: Color)
+        // Piston Height (H) is inversely proportional to Volume (V)
+        const CYLINDER_RADIUS = 0.8;
+        const CYLINDER_HEIGHT = 10;
+        const PISTON_THICKNESS = 0.5;
+        const BASE_HEIGHT = -CYLINDER_HEIGHT / 2; // Bottom of cylinder
+
+        // H = Height from the base of the cylinder (representing V)
+        const CARNOT_STATES = [
+            // State 1: Start (High P, Low V, High T)
+            { V: 2.0, H: 2.0, T_color: 0xff4500, label: "State 1 (High P, Low V, High T)" },
+            // State 2: Isothermal Expansion (Low P, High V, High T)
+            { V: 5.0, H: 5.0, T_color: 0xffa500, label: "State 2 (Low P, High V, High T)" },
+            // State 3: Adiabatic Expansion (Lowest P, Highest V, Low T)
+            { V: 8.0, H: 8.0, T_color: 0x1e90ff, label: "State 3 (Lowest P, Highest V, Low T)" },
+            // State 4: Isothermal Compression (Mid P, Mid V, Low T)
+            { V: 4.0, H: 4.0, T_color: 0x4682b4, label: "State 4 (Mid P, Mid V, Low T)" },
+            // State 1 again for cycle closure
+            { V: 2.0, H: 2.0, T_color: 0xff4500, label: "Cycle Complete: Back to State 1" }
+        ];
+
+        const PROCESS_INFO = [
+            "Start Position: State 1",
+            "Process 1→2: Isothermal Expansion (Heat Added)",
+            "Process 2→3: Adiabatic Expansion (Work Done)",
+            "Process 3→4: Isothermal Compression (Heat Rejected)",
+            "Process 4→1: Adiabatic Compression (Work Done)"
+        ];
+
+        // --- Utility Functions ---
+
+        // Simple linear interpolation
+        const lerp = (start, end, t) => start * (1 - t) + end * t;
+
+        // Helper to get color interpolation
+        function getLerpedColor(colorStart, colorEnd, t) {
+            const r = lerp((colorStart >> 16) & 0xFF, (colorEnd >> 16) & 0xFF, t);
+            const g = lerp((colorStart >> 8) & 0xFF, (colorEnd >> 8) & 0xFF, t);
+            const b = lerp(colorStart & 0xFF, (colorEnd & 0xFF), t);
+            return (Math.floor(r) << 16) + (Math.floor(g) << 8) + Math.floor(b);
+        }
+
+        // --- Three.js Initialization ---
+
+        function init() {
+            const container = document.getElementById('scene-container');
+            const aspectRatio = container.clientWidth / container.clientHeight;
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x1f2937, 15, 30);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(50, aspectRatio, 0.1, 100);
+            camera.position.set(10, 8, 10);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 5;
+            controls.maxDistance = 25;
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight.position.set(5, 10, 7);
+            scene.add(directionalLight);
+
+            // Create Objects
+            createCylinderEngine();
+            createPVDiagram();
+            
+            // Set initial state (State 1)
+            setState(0);
+
+            // Handle window resizing
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Start animation loop
+            animate();
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('scene-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        function createCylinderEngine() {
+            // 1. Cylinder Wall (Transparent)
+            const cylinderGeometry = new THREE.CylinderGeometry(CYLINDER_RADIUS, CYLINDER_RADIUS, CYLINDER_HEIGHT, 32, 1, true);
+            const cylinderMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xaaaaaa, 
+                opacity: 0.3, 
+                transparent: true,
+                side: THREE.DoubleSide
+            });
+            cylinder = new THREE.Mesh(cylinderGeometry, cylinderMaterial);
+            cylinder.position.y = 0;
+            scene.add(cylinder);
+
+            // 2. Cylinder Base (Insulated)
+            const baseGeometry = new THREE.CircleGeometry(CYLINDER_RADIUS, 32);
+            const baseMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
+            const cylinderBase = new THREE.Mesh(baseGeometry, baseMaterial);
+            cylinderBase.rotation.x = -Math.PI / 2;
+            cylinderBase.position.y = BASE_HEIGHT;
+            scene.add(cylinderBase);
+
+            // 3. Piston
+            const pistonGeometry = new THREE.CylinderGeometry(CYLINDER_RADIUS, CYLINDER_RADIUS, PISTON_THICKNESS, 32);
+            const pistonMaterial = new THREE.MeshPhongMaterial({ color: 0xcccccc, shininess: 80 });
+            piston = new THREE.Mesh(pistonGeometry, pistonMaterial);
+            // Initial position is set in setState(0)
+            scene.add(piston);
+
+            // 4. Gas Volume (changes height and color)
+            const gasGeometry = new THREE.CylinderGeometry(CYLINDER_RADIUS * 0.95, CYLINDER_RADIUS * 0.95, 1, 32);
+            const gasMaterial = new THREE.MeshPhongMaterial({ color: CARNOT_STATES[0].T_color, transparent: true, opacity: 0.8 });
+            gasVolume = new THREE.Mesh(gasGeometry, gasMaterial);
+            scene.add(gasVolume);
+        }
+        
+        function createPVDiagram() {
+            // INCREASED SCALE FACTORS for a larger, more prominent graph
+            const scaleP = 0.05; // Scale Pressure (Y)
+            const scaleV = 0.8; // Scale Volume (X)
+            const offsetZ = -5; // Place the diagram behind the engine
+
+            // Axes
+            const axesHelper = new THREE.AxesHelper(10); // Red=X (V), Green=Y (P), Blue=Z (Ignored)
+            axesHelper.position.set(0, -CYLINDER_HEIGHT/2, offsetZ);
+            scene.add(axesHelper);
+
+            const vAxisLabel = createTextSprite("Volume (V)", 0xaaaaaa);
+            // Adjust label position based on new scale
+            vAxisLabel.position.set(10 * scaleV + 0.5, -CYLINDER_HEIGHT/2, offsetZ); 
+            scene.add(vAxisLabel);
+
+            const pAxisLabel = createTextSprite("Pressure (P)", 0xaaaaaa);
+            // Adjust label position based on new scale
+            pAxisLabel.position.set(0, 10 * scaleP - CYLINDER_HEIGHT/2 + 0.5, offsetZ); 
+            scene.add(pAxisLabel);
+
+
+            // --- REFINED POINTS FOR BETTER SIZE AND STANDARD SHAPE ---
+            // The P values are adjusted to create a better visual contrast between the
+            // isothermal (flatter) and adiabatic (steeper) curves.
+            const points = [
+                { V: 2.0, P: 200 }, // 1: High P, Low V
+                { V: 5.0, P: 100 }, // 2: Mid P, High V (Isothermal, relatively flat)
+                { V: 8.0, P: 30 },  // 3: Lowest P, Highest V (Adiabatic, steep drop)
+                { V: 4.0, P: 60 },  // 4: Mid P, Mid V (Isothermal, relatively flat)
+                { V: 2.0, P: 200 }  // Back to 1 (Adiabatic, steep rise)
+            ];
+
+            const curvePoints = [];
+            points.forEach(p => {
+                // Map P to Y and V to X
+                curvePoints.push(new THREE.Vector3(
+                    p.V * scaleV, 
+                    p.P * scaleP + BASE_HEIGHT, 
+                    offsetZ
+                ));
+            });
+            
+            // Create a custom curve for the cycle
+            // CatmullRomCurve3 is used to smoothly interpolate between the points.
+            const curve = new THREE.CatmullRomCurve3(curvePoints);
+            const geometry = new THREE.TubeGeometry(curve, 64, 0.1, 8, true);
+            const material = new THREE.MeshPhongMaterial({ color: 0x4ade80, shininess: 100 });
+            pvCurve = new THREE.Mesh(geometry, material);
+            scene.add(pvCurve);
+        }
+
+        function createTextSprite(message, color) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            context.font = 'Bold 40px Inter, sans-serif';
+            context.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
+            context.fillText(message, 0, 40);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            // Adjust scale based on font size and desired visual size
+            sprite.scale.set(5, 5 * (canvas.height / canvas.width), 1); 
+            return sprite;
+        }
+
+
+        // --- Simulation Control Logic ---
+
+        function setState(stateIndex) {
+            const state = CARNOT_STATES[stateIndex];
+            const gasY = BASE_HEIGHT + state.H / 2;
+            const pistonY = BASE_HEIGHT + state.H + PISTON_THICKNESS / 2;
+
+            // Gas
+            gasVolume.geometry.dispose();
+            gasVolume.geometry = new THREE.CylinderGeometry(CYLINDER_RADIUS * 0.95, CYLINDER_RADIUS * 0.95, state.H, 32);
+            gasVolume.position.y = gasY;
+            gasVolume.material.color.setHex(state.T_color);
+
+            // Piston
+            piston.position.y = pistonY;
+            
+            document.getElementById('process-info').textContent = CARNOT_STATES[stateIndex].label;
+            
+            if (stateIndex === 0) {
+                document.getElementById('next-btn').textContent = `Next Step (0/4)`;
+            } else if (stateIndex === 4) {
+                document.getElementById('next-btn').textContent = `Cycle Complete!`;
+                document.getElementById('next-btn').disabled = true;
+                document.getElementById('start-btn').disabled = true;
+                document.getElementById('reset-btn').disabled = false;
+            } else {
+                 document.getElementById('next-btn').textContent = `Next Step (${stateIndex}/4)`;
+            }
+        }
+
+        function startCycle() {
+            currentStep = 0;
+            document.getElementById('start-btn').disabled = true;
+            document.getElementById('next-btn').disabled = false;
+            document.getElementById('reset-btn').disabled = false;
+            nextStep();
+        }
+
+        function nextStep() {
+            if (isAnimating) return;
+            
+            // Increment currentStep to move to the next state transition (e.g., from state 1 to 2)
+            currentStep++; 
+
+            if (currentStep > 4) {
+                // Cycle complete
+                currentStep = 4;
+                setState(4);
+                return;
+            }
+
+            // Start animation for the transition
+            isAnimating = true;
+            animationProgress = 0;
+            document.getElementById('next-btn').disabled = true;
+            document.getElementById('process-info').textContent = PROCESS_INFO[currentStep];
+        }
+
+        function resetSimulation() {
+            currentStep = 0;
+            isAnimating = false;
+            animationProgress = 0;
+            setState(0); // Reset to State 1
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('next-btn').disabled = true;
+            document.getElementById('reset-btn').disabled = true;
+            document.getElementById('next-btn').textContent = `Next Step (0/4)`;
+            document.getElementById('process-info').textContent = PROCESS_INFO[0];
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            controls.update(); // only required if controls.enableDamping = true
+
+            if (isAnimating && currentStep >= 1 && currentStep <= 4) {
+                const startState = CARNOT_STATES[currentStep - 1];
+                const endState = CARNOT_STATES[currentStep];
+
+                animationProgress++;
+                const t = animationProgress / ANIMATION_DURATION; // 0 to 1
+
+                // 1. Interpolate Gas Volume/Piston Height
+                const currentH = lerp(startState.H, endState.H, t);
+                const gasY = BASE_HEIGHT + currentH / 2;
+                const pistonY = BASE_HEIGHT + currentH + PISTON_THICKNESS / 2;
+                
+                // Update Gas
+                gasVolume.geometry.dispose();
+                gasVolume.geometry = new THREE.CylinderGeometry(CYLINDER_RADIUS * 0.95, CYLINDER_RADIUS * 0.95, currentH, 32);
+                gasVolume.position.y = gasY;
+
+                // Update Piston
+                piston.position.y = pistonY;
+
+                // 2. Interpolate Gas Color (Temperature change)
+                const startColor = startState.T_color;
+                const endColor = endState.T_color;
+                const newColor = getLerpedColor(startColor, endColor, t);
+                gasVolume.material.color.setHex(newColor);
+                
+                // End animation check
+                if (animationProgress >= ANIMATION_DURATION) {
+                    isAnimating = false;
+                    animationProgress = 0;
+                    setState(currentStep); // Snap to final state values for precision
+                    if (currentStep < 4) {
+                        document.getElementById('next-btn').disabled = false;
+                    }
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Initialize the simulation on window load
+        window.onload = function() {
+            init();
+            resetSimulation(); // Ensure initial button states are set
+        };
+
+    </script>
+
+</body>
+</html>
