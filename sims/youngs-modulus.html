@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Electromagnetic Induction 3D Simulation</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Include OrbitControls for interactive camera movement -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #simulation-container {
+            width: 100%;
+            flex-grow: 1;
+            min-height: 70vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #262c3a; /* Dark background for 3D scene */
+            position: relative;
+        }
+        canvas {
+            display: block;
+        }
+        /* Style for the Ammeter/Galvanometer */
+        #ammeter {
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 0.75rem 1.25rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            z-index: 10;
+        }
+        #ammeter h3 {
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+            color: #1f2937;
+        }
+        #current-needle {
+            display: inline-block;
+            width: 4px;
+            height: 30px;
+            background-color: #4b5563;
+            transform-origin: bottom center;
+            transition: transform 0.1s ease-out;
+            border-radius: 2px 2px 0 0;
+        }
+        #current-display {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: #00FF00;
+            text-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
+        }
+        .control-panel {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem;
+            background-color: #ffffff;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-top: 1rem;
+            width: 100%;
+            max-w-4xl;
+        }
+        .control-panel label {
+            font-weight: 600;
+            color: #4b5563;
+        }
+        .control-panel input[type="range"] {
+            flex-grow: 1;
+        }
+        .btn-group button {
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            transition: background-color 0.2s;
+        }
+        .btn-group button.active {
+            background-color: #3b82f6;
+            color: white;
+        }
+    </style>
+</head>
+<body class="p-4">
+
+    <!-- FIX: Replaced KaTeX syntax with standard HTML/Unicode for display compatibility -->
+    <h1 class="text-3xl font-bold mb-4 text-gray-800">Electromagnetic Induction (E = - d&Phi;<sub>B</sub> / dt)</h1>
+
+    <div id="simulation-container" class="rounded-xl shadow-2xl w-full">
+        <div id="ammeter">
+            <h3>Induced Current ($I$)</h3>
+            <div class="flex flex-col items-center">
+                <div class="h-8 w-1 bg-gray-300 relative rounded-md">
+                    <!-- Base of the Ammeter Scale -->
+                    <div id="current-needle" style="transform: rotate(0deg);"></div>
+                    <div class="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-3 h-3 bg-gray-700 rounded-full"></div>
+                </div>
+                <div class="text-sm text-gray-500 mt-1 flex justify-between w-full px-1">
+                    <span class="text-red-500 font-bold">CCW</span>
+                    <span class="text-green-500 font-bold">0</span>
+                    <span class="text-blue-500 font-bold">CW</span>
+                </div>
+            </div>
+            <div id="current-value" class="text-xl font-bold mt-2 text-green-500">0.0 A</div>
+        </div>
+
+        <!-- Three.js Canvas will be appended here -->
+    </div>
+
+    <div class="control-panel max-w-4xl">
+        <label for="magnet-position">Magnet Position (Z-Axis):</label>
+        <input type="range" id="magnet-position" min="-8" max="8" step="0.01" value="0" class="h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+        <span id="magnet-pos-value" class="text-blue-600 font-mono text-sm w-12 text-right">0.00</span>
+        <div class="btn-group ml-4">
+            <button id="auto-button" class="bg-gray-200 hover:bg-gray-300 text-gray-800">Auto Motion</button>
+        </div>
+    </div>
+
+
+    <div class="mt-4 p-4 bg-white rounded-xl shadow-lg w-full max-w-4xl text-center">
+        <!-- FIX: Updated flux symbol for compatibility -->
+        <p class="text-gray-700">Move the magnet along the Z-axis or use 'Auto Motion' to demonstrate the change in magnetic flux (&Phi;<sub>B</sub>) and the resulting induced current ($I$).</p>
+        <p class="text-sm text-gray-500 mt-2">Current is induced only when the magnet is **moving** (rate of change of flux is non-zero), as per **Faraday's Law** (E = - d&Phi;<sub>B</sub> / dt).</p>
+    </div>
+
+    <script type="module">
+        // --- CONSTANTS ---
+        const MAGNET_LENGTH = 6;
+        const MAGNET_WIDTH = 1.8;
+        const MAGNET_HEIGHT = 1.8;
+        const NORTH_COLOR = 0xCF3C3C; // Red
+        const SOUTH_COLOR = 0x3C3CCF; // Blue
+        const FIELD_LINE_COLOR = 0x00FF00; // Green
+        const NUM_FIELD_LINES = 30;
+        const LINE_SEGMENTS = 128;
+        const COIL_COLOR = 0xEEEEEE; // Copper color
+        const CURRENT_CW_COLOR = 0x3b82f6; // Blue for Clockwise
+        const CURRENT_CCW_COLOR = 0xef4444; // Red for Counter-Clockwise
+        const MAX_CURRENT = 10; // Maximum current magnitude for scaling the visualization
+
+        // Coil dimensions
+        const COIL_RADIUS = 3.0;
+        const COIL_THICKNESS = 0.3;
+        const COIL_TURNS = 10;
+        const COIL_HEIGHT = 1.5;
+
+        // --- STATE & PHYSICS VARIABLES ---
+        let scene, camera, renderer, controls;
+        let magnetGroup, coilMesh;
+        let isAutoMoving = false;
+        let autoMotionTime = 0;
+        let lastMagnetPos = 0;
+        let previousTime = performance.now();
+        let inducedCurrent = 0;
+
+        const simContainer = document.getElementById('simulation-container');
+        const magnetPositionInput = document.getElementById('magnet-position');
+        const autoButton = document.getElementById('auto-button');
+        const currentNeedle = document.getElementById('current-needle');
+        const currentDisplay = document.getElementById('current-value');
+        const magnetPosValueDisplay = document.getElementById('magnet-pos-value');
+
+
+        // --- HELPER FOR TEXTURES (SPRITES) ---
+        function makeTextSprite(message, parameters) {
+            if (parameters === undefined) parameters = {};
+            const fontface = parameters.hasOwnProperty("fontface") ? parameters["fontface"] : "Inter";
+            const fontsize = parameters.hasOwnProperty("fontsize") ? parameters["fontsize"] : 50;
+            const textColor = parameters.hasOwnProperty("textColor") ? parameters["textColor"] : { r: 255, g: 255, b: 255, a: 1.0 };
+            const scaleFactor = parameters.hasOwnProperty("scaleFactor") ? parameters["scaleFactor"] : 0.01;
+
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            context.font = "Bold " + fontsize + "px " + fontface;
+            
+            const metrics = context.measureText(message);
+            const textWidth = metrics.width;
+
+            canvas.width = textWidth + 10;
+            canvas.height = fontsize + 10;
+
+            context.font = "Bold " + fontsize + "px " + fontface;
+            context.textBaseline = "middle"; 
+            context.textAlign = "center";   
+            
+            context.fillStyle = "rgba(" + textColor.r + ", " + textColor.g + ", " + textColor.b + ", 1.0)";
+            context.fillText(message, canvas.width / 2, canvas.height / 2);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.minFilter = THREE.LinearFilter; 
+
+            const spriteMaterial = new THREE.SpriteMaterial({ 
+                map: texture,
+                transparent: true 
+            });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.scale.set(canvas.width * scaleFactor, canvas.height * scaleFactor, 1); 
+            return sprite;
+        }
+
+        // --- FIELD LINE GENERATION ---
+        function createFieldLine(startAngle, lengthFactor, isInner) {
+            const r_pole = MAGNET_LENGTH / 2;
+            let start, end, control;
+
+            if (!isInner) {
+                // Outer Field Line (N to S)
+                const startX = MAGNET_WIDTH / 2 * Math.cos(startAngle);
+                const startY = MAGNET_HEIGHT / 2 * Math.sin(startAngle);
+
+                start = new THREE.Vector3(startX, startY, r_pole);
+                end = new THREE.Vector3(-startX, -startY, -r_pole);
+
+                const controlX = startX * lengthFactor * 2.5; 
+                const controlY = startY * lengthFactor * 2.5;
+                const controlZ = 0;
+                control = new THREE.Vector3(controlX, controlY, controlZ);
+
+            } else {
+                // Inner Field Line (S to N) - offset for visibility
+                start = new THREE.Vector3(0, 0, -r_pole + 0.1); 
+                end = new THREE.Vector3(0, 0, r_pole - 0.1);   
+                control = new THREE.Vector3(0, 0, 0); 
+
+                start.x = Math.random() * 0.5 - 0.25;
+                start.y = Math.random() * 0.5 - 0.25;
+                end.x = start.x;
+                end.y = start.y;
+            }
+
+            const curve = new THREE.QuadraticBezierCurve3(start, control, end);
+            const points = curve.getPoints(LINE_SEGMENTS);
+
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({ color: FIELD_LINE_COLOR, linewidth: 2 });
+            const line = new THREE.Line(geometry, material);
+            
+            const arrowPos = curve.getPoint(isInner ? 0.5 : 0.15); 
+            let arrowTangent = curve.getTangent(isInner ? 0.5 : 0.15).normalize();
+
+            // Reverse direction for outer loop (N -> S)
+            if (!isInner) {
+                arrowTangent.negate();
+            }
+            
+            // Store the arrow helper reference for the magnet group
+            const arrowHelper = new THREE.ArrowHelper(
+                arrowTangent,
+                arrowPos,
+                0.3,
+                FIELD_LINE_COLOR,
+                0.15,
+                0.1
+            );
+            line.add(arrowHelper);
+            line.name = 'FieldLine';
+
+            return line;
+        }
+
+        // --- MAGNET CREATION ---
+        function createMagnet() {
+            const group = new THREE.Group();
+            
+            // Magnet Mesh
+            const geometry = new THREE.BoxGeometry(MAGNET_WIDTH, MAGNET_HEIGHT, MAGNET_LENGTH);
+            const positionAttribute = geometry.getAttribute('position');
+            const colors = [];
+            const colorN = new THREE.Color(NORTH_COLOR);
+            const colorS = new THREE.Color(SOUTH_COLOR);
+
+            for (let i = 0; i < positionAttribute.count; i++) {
+                if (positionAttribute.getZ(i) > 0) {
+                    colors.push(colorN.r, colorN.g, colorN.b); 
+                } else {
+                    colors.push(colorS.r, colorS.g, colorS.b);
+                }
+            }
+
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ vertexColors: true }));
+            mesh.name = 'MagnetMesh';
+            group.add(mesh);
+            
+            // Field Lines (Outer)
+            for (let i = 0; i < NUM_FIELD_LINES; i++) {
+                const angle = Math.PI * 2 * (i / NUM_FIELD_LINES);
+                const lengthFactor = 1.0 + Math.random() * 1.5; 
+                const line = createFieldLine(angle, lengthFactor, false);
+                group.add(line);
+            }
+
+            // Field Lines (Inner)
+            for (let i = 0; i < 6; i++) { 
+                 const line = createFieldLine(0, 0, true);
+                 group.add(line);
+            }
+            
+            // Labels
+            const labelN = makeTextSprite("N", { fontsize: 60, textColor: { r: 255, g: 255, b: 255, a: 1.0 }, scaleFactor: 0.015 });
+            labelN.position.set(0, MAGNET_HEIGHT / 2 + 0.1, MAGNET_LENGTH / 2 + 0.1);
+            group.add(labelN);
+
+            const labelS = makeTextSprite("S", { fontsize: 60, textColor: { r: 255, g: 255, b: 255, a: 1.0 }, scaleFactor: 0.015 });
+            labelS.position.set(0, MAGNET_HEIGHT / 2 + 0.1, -MAGNET_LENGTH / 2 - 0.1);
+            group.add(labelS);
+
+            const labelB = makeTextSprite("B\u20D7", { fontsize: 60, textColor: { r: 0, g: 255, b: 0, a: 1.0 }, scaleFactor: 0.02 }); 
+            labelB.position.set(MAGNET_WIDTH * 1.5, MAGNET_LENGTH * 0.7, 0); 
+            group.add(labelB);
+            
+            group.name = 'MagnetGroup';
+            return group;
+        }
+
+        // --- COIL CREATION ---
+        function createCoil() {
+            // Torus Geometry for a basic coil shape
+            const geometry = new THREE.TorusGeometry(COIL_RADIUS, COIL_THICKNESS, 16, 100);
+            const material = new THREE.MeshPhongMaterial({ 
+                color: COIL_COLOR, 
+                shininess: 30,
+                specular: 0x555555
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            
+            // Position the coil slightly off the origin to leave room for the magnet to pass through
+            mesh.rotation.x = Math.PI / 2; // Rotate to lie in the XY plane
+            mesh.position.z = 0; // Center position
+            
+            mesh.name = 'CoilMesh';
+            
+            // Add a static arrow marker to show current direction
+            const currentArrow = new THREE.ArrowHelper(
+                new THREE.Vector3(1, 0, 0), // Default direction along X-axis
+                new THREE.Vector3(COIL_RADIUS + 0.5, 0, 0), // Position slightly outside coil
+                1.5, // length
+                0xffffff, // initial color (will be updated)
+                0.5, // headLength
+                0.3  // headWidth
+            );
+            currentArrow.rotation.z = Math.PI / 2; // Keep arrow upright relative to coil plane
+            currentArrow.visible = false;
+            currentArrow.name = 'CurrentArrow';
+            mesh.add(currentArrow);
+
+            // Add a label for I
+            const labelI = makeTextSprite("I", { fontsize: 50, textColor: { r: 255, g: 255, b: 255, a: 1.0 }, scaleFactor: 0.012 });
+            labelI.position.set(COIL_RADIUS + 0.5, 1.5, 0);
+            labelI.name = 'CurrentLabel';
+            mesh.add(labelI);
+
+            return mesh;
+        }
+
+        // --- FLUX & INDUCTION LOGIC ---
+        function calculateInducedCurrent(magnetPos, velocity, deltaTime) {
+            // Simplified Model for Magnetic Flux (Phi_B) centered at z=0 (the coil)
+            // Use a Gaussian-like function: Phi_B ~ exp(-k * z^2)
+            // The rate of change of flux (dPhi/dt) is proportional to the induced EMF (E)
+            // E = -dPhi/dt = - (dPhi/dz) * (dz/dt) = - (dPhi/dz) * velocity
+            // Since I is proportional to E, I ~ - (dPhi/dz) * velocity
+
+            // We use the derivative of the approximation to find dPhi/dz:
+            // d(exp(-k * z^2))/dz = exp(-k * z^2) * (-2 * k * z)
+            
+            const K = 0.05; // Scaling factor for how sharply the field drops off
+            const Z = magnetPos;
+            
+            // 1. Calculate rate of change of flux (dPhi/dt)
+            // This term accounts for the field gradient (how much the flux changes with position)
+            const fluxGradient = Math.exp(-K * Z * Z) * (-2 * K * Z); 
+            
+            // 2. Induced EMF (Faraday's Law: E = -N * dPhi/dt). We approximate dPhi/dt with FluxGradient * velocity
+            // The magnitude is proportional to both the field gradient and the velocity
+            let inducedEMF = -fluxGradient * velocity;
+            
+            // 3. Induced Current (Ohm's Law: I = E/R). We ignore R and scale I for visualization.
+            let I = inducedEMF * 1000; // Scaled for visualization purposes
+
+            // Limit current magnitude
+            I = THREE.MathUtils.clamp(I, -MAX_CURRENT, MAX_CURRENT);
+            
+            return I; // Current direction: positive = CW (looking from +Z), negative = CCW
+        }
+        
+        // --- VISUAL UPDATE LOOP (Called every frame) ---
+        function updateInductionVisuals(deltaTime) {
+            const currentMagnetPos = magnetGroup.position.z;
+            const velocity = (currentMagnetPos - lastMagnetPos) / (deltaTime / 1000); // meters per second
+            
+            inducedCurrent = calculateInducedCurrent(currentMagnetPos, velocity, deltaTime);
+
+            // --- 1. Ammeter/UI Update ---
+            const currentMagnitude = Math.abs(inducedCurrent);
+            const currentDirection = Math.sign(inducedCurrent);
+
+            // Needle angle: -90 degrees (CCW, negative current) to +90 degrees (CW, positive current)
+            const angle = (inducedCurrent / MAX_CURRENT) * 90; 
+            currentNeedle.style.transform = `rotate(${angle}deg)`;
+
+            let color;
+            let currentText;
+            if (currentDirection > 0) { // CW
+                color = 'rgb(59, 130, 246)'; // Tailwind blue-500
+                currentText = `+${currentMagnitude.toFixed(2)} A (CW)`;
+            } else if (currentDirection < 0) { // CCW
+                color = 'rgb(239, 68, 68)'; // Tailwind red-500
+                currentText = `${currentMagnitude.toFixed(2)} A (CCW)`;
+            } else { // Zero
+                color = 'rgb(16, 185, 129)'; // Tailwind green-500
+                currentText = '0.00 A';
+            }
+            
+            currentDisplay.textContent = currentText;
+            currentDisplay.style.color = color;
+            currentNeedle.style.backgroundColor = (currentDirection !== 0) ? color : '#4b5563';
+            
+            // --- 2. 3D Coil Visual Update ---
+            const coilMaterial = coilMesh.material;
+            const currentArrow = coilMesh.getObjectByName('CurrentArrow');
+
+            if (currentDirection !== 0) {
+                // Coil Color: Brighten/color the coil based on current
+                coilMaterial.emissive.set(currentDirection > 0 ? CURRENT_CW_COLOR : CURRENT_CCW_COLOR);
+                coilMaterial.emissiveIntensity = currentMagnitude / MAX_CURRENT * 0.5 + 0.2; // Min brightness 0.2
+                
+                // Current Arrow: Set direction and visibility
+                const directionVector = currentDirection > 0 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 0, -1);
+                // Rotate arrow based on direction
+                currentArrow.setDirection(directionVector); 
+                currentArrow.setLength(1.5, 0.5, 0.3); // Adjust size based on magnitude
+                currentArrow.setColor(currentDirection > 0 ? CURRENT_CW_COLOR : CURRENT_CCW_COLOR);
+                currentArrow.visible = true;
+
+            } else {
+                // No current: reset coil appearance
+                coilMaterial.emissive.set(0x000000);
+                coilMaterial.emissiveIntensity = 0;
+                currentArrow.visible = false;
+            }
+
+            lastMagnetPos = currentMagnetPos;
+        }
+
+        // --- SCENE INITIALIZATION ---
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x262c3a);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(60, simContainer.clientWidth / simContainer.clientHeight, 0.1, 1000);
+            camera.position.set(MAGNET_LENGTH * 2.5, MAGNET_LENGTH * 1.5, MAGNET_LENGTH * 2.5); 
+            camera.lookAt(0, 0, 0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(simContainer.clientWidth, simContainer.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            simContainer.appendChild(renderer.domElement);
+
+            // Orbit Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxDistance = MAGNET_LENGTH * 8;
+            controls.minDistance = 5;
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
+            directionalLight.position.set(5, 5, 5).normalize();
+            scene.add(directionalLight);
+
+            // --- 1. Create Magnet Group ---
+            magnetGroup = createMagnet();
+            scene.add(magnetGroup);
+
+            // --- 2. Create Stationary Coil ---
+            coilMesh = createCoil();
+            scene.add(coilMesh);
+
+            // Set initial position for induction calculation
+            lastMagnetPos = magnetGroup.position.z;
+
+            window.addEventListener('resize', onWindowResize, false);
+            
+            // Setup Input Handlers
+            magnetPositionInput.addEventListener('input', handleManualControl);
+            autoButton.addEventListener('click', toggleAutoMotion);
+        }
+        
+        // --- INPUT HANDLERS ---
+        function handleManualControl() {
+            if (isAutoMoving) toggleAutoMotion(); // Stop auto when manual control is used
+            const newPos = parseFloat(magnetPositionInput.value);
+            magnetGroup.position.z = newPos;
+            magnetPosValueDisplay.textContent = newPos.toFixed(2);
+        }
+
+        function toggleAutoMotion() {
+            isAutoMoving = !isAutoMoving;
+            autoButton.classList.toggle('active', isAutoMoving);
+            autoButton.textContent = isAutoMoving ? 'Stop Auto' : 'Auto Motion';
+            
+            if (isAutoMoving) {
+                // Reset time when starting auto motion
+                autoMotionTime = 0; 
+                magnetPositionInput.disabled = true;
+            } else {
+                magnetPositionInput.disabled = false;
+            }
+        }
+
+
+        // --- ANIMATION LOOP ---
+        function animate(currentTime) {
+            requestAnimationFrame(animate);
+
+            const deltaTime = currentTime - previousTime;
+            previousTime = currentTime;
+            
+            // 1. Auto Motion Update
+            if (isAutoMoving) {
+                autoMotionTime += deltaTime / 1000; // Convert to seconds
+                
+                // Use a sine wave to move the magnet back and forth
+                const oscillationAmplitude = 8;
+                const oscillationSpeed = 1.0; // Hz
+                const newPos = oscillationAmplitude * Math.sin(autoMotionTime * Math.PI * 2 * oscillationSpeed);
+                
+                magnetGroup.position.z = newPos;
+                magnetPositionInput.value = newPos; // Update slider position
+                magnetPosValueDisplay.textContent = newPos.toFixed(2);
+            }
+
+            // 2. Induction/Visual Update
+            if (deltaTime > 0) {
+                updateInductionVisuals(deltaTime);
+            }
+
+            // 3. Render
+            if (controls) {
+                controls.update(); 
+            }
+            if (renderer && scene && camera) {
+                renderer.render(scene, camera);
+            }
+        }
+
+        // --- EVENT HANDLERS ---
+        function onWindowResize() {
+            if (camera && renderer) {
+                camera.aspect = simContainer.clientWidth / simContainer.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(simContainer.clientWidth, simContainer.clientHeight);
+            }
+        }
+
+        // Initialize and start the simulation
+        window.onload = function () {
+            init();
+            animate(performance.now());
+        };
+    </script>
+</body>
+</html>
