@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Series Capacitor Simulation</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #canvas-container { width: 100%; height: 100vh; display: block; }
+        
+        /* UI Overlay */
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 300px;
+            background: rgba(10, 20, 40, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(100, 200, 255, 0.3);
+            color: white;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        h2 { margin-top: 0; font-size: 1.2rem; color: #fbbf24; text-align: center; margin-bottom: 15px; }
+        
+        .control-group { margin-bottom: 15px; }
+        .control-group label { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 5px; color: #ddd; }
+        .control-group input[type=range] { width: 100%; cursor: pointer; accent-color: #fbbf24; }
+        
+        .stats { margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); }
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.9rem; }
+        .stat-value { font-family: monospace; color: #60a5fa; font-weight: bold; }
+        .highlight { color: #fbbf24; }
+
+        /* 3D Labels */
+        .label {
+            position: absolute;
+            color: #fbbf24;
+            font-weight: bold;
+            font-size: 16px;
+            text-shadow: 0 0 5px #000;
+            pointer-events: none;
+            user-select: none;
+            transform: translate(-50%, -50%);
+        }
+        
+        .voltage-label { color: #fff; background: #b91c1c; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+        .cap-label { color: #fbbf24; font-size: 18px; }
+
+        #loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: white; font-size: 1.5rem; pointer-events: none;
+        }
+    </style>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    <div id="loading">Loading Simulation...</div>
+
+    <!-- Interface -->
+    <div id="ui-container">
+        <h2>Series Circuit Controls</h2>
+        
+        <div class="control-group">
+            <label><span>Voltage (V)</span> <span id="val-v">12 V</span></label>
+            <input type="range" id="input-v" min="0" max="24" step="1" value="12">
+        </div>
+
+        <div class="control-group">
+            <label><span>Capacitor 1 (C1)</span> <span id="val-c1">2 µF</span></label>
+            <input type="range" id="input-c1" min="1" max="10" step="0.5" value="2">
+        </div>
+
+        <div class="control-group">
+            <label><span>Capacitor 2 (C2)</span> <span id="val-c2">4 µF</span></label>
+            <input type="range" id="input-c2" min="1" max="10" step="0.5" value="4">
+        </div>
+
+        <div class="control-group">
+            <label><span>Capacitor 3 (C3)</span> <span id="val-c3">6 µF</span></label>
+            <input type="range" id="input-c3" min="1" max="10" step="0.5" value="6">
+        </div>
+
+        <div class="stats">
+            <div class="stat-row"><span>Equivalent Cap (C<sub>eq</sub>):</span> <span class="stat-value" id="stat-ceq">0.00 µF</span></div>
+            <div class="stat-row"><span>Total Charge (Q):</span> <span class="stat-value highlight" id="stat-q">0.00 µC</span></div>
+            <div class="stat-row" style="margin-top:10px; font-size: 0.8em; color: #aaa;">Since they are in series, Charge Q is the same on all capacitors.</div>
+        </div>
+    </div>
+
+    <!-- Labels Container -->
+    <div id="labels"></div>
+
+    <script>
+        // --- Configuration & State ---
+        const config = {
+            plateWidth: 2,
+            plateHeight: 3,
+            plateDepth: 0.2,
+            gap: 1.5,
+            wireRadius: 0.1,
+            spacing: 5 // Distance between capacitors centers
+        };
+
+        const state = {
+            V: 12,
+            C1: 2,
+            C2: 4,
+            C3: 6,
+            Q: 0,
+            Ceq: 0
+        };
+
+        // --- Three.js Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a1525); // Dark blue from image
+        scene.fog = new THREE.FogExp2(0x0a1525, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 5, 18);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 5;
+        controls.maxDistance = 50;
+        controls.target.set(0, 1, 0);
+
+        // --- Lights ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        const spotLight = new THREE.SpotLight(0xffffff, 1);
+        spotLight.position.set(10, 20, 20);
+        spotLight.castShadow = true;
+        scene.add(spotLight);
+
+        const pointLight = new THREE.PointLight(0x4488ff, 0.5);
+        pointLight.position.set(-10, 5, 0);
+        scene.add(pointLight);
+
+        // --- Floor ---
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshStandardMaterial({ 
+            color: 0x050a14, 
+            roughness: 0.1, 
+            metalness: 0.5 
+        });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = -3;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // --- Textures helper ---
+        function createSymbolTexture(symbol, color) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = color;
+            ctx.font = 'bold 50px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(symbol, 32, 34);
+            const tex = new THREE.CanvasTexture(canvas);
+            return tex;
+        }
+
+        const plusTex = createSymbolTexture('+', '#ff4444');
+        const minusTex = createSymbolTexture('-', '#4488ff');
+
+        // --- Component Builders ---
+
+        // 1. Capacitor Class
+        class Capacitor3D {
+            constructor(id, position) {
+                this.id = id;
+                this.group = new THREE.Group();
+                this.group.position.copy(position);
+                
+                // Materials
+                const plateMat = new THREE.MeshStandardMaterial({ 
+                    color: 0xaaaaaa, 
+                    metalness: 0.8, 
+                    roughness: 0.2 
+                });
+                const glassMat = new THREE.MeshPhysicalMaterial({
+                    color: 0xffffff,
+                    metalness: 0,
+                    roughness: 0,
+                    transmission: 0.9, // Glass-like
+                    transparent: true,
+                    opacity: 0.3
+                });
+                
+                // Left Plate (Positive usually in this orientation)
+                const leftPlate = new THREE.Mesh(new THREE.BoxGeometry(config.plateDepth, config.plateHeight, config.plateWidth), plateMat);
+                leftPlate.position.x = -config.gap / 2;
+                leftPlate.castShadow = true;
+                this.group.add(leftPlate);
+
+                // Right Plate
+                const rightPlate = new THREE.Mesh(new THREE.BoxGeometry(config.plateDepth, config.plateHeight, config.plateWidth), plateMat);
+                rightPlate.position.x = config.gap / 2;
+                rightPlate.castShadow = true;
+                this.group.add(rightPlate);
+
+                // Dielectric (Glass Box)
+                const dielectric = new THREE.Mesh(new THREE.BoxGeometry(config.gap - 0.1, config.plateHeight + 0.2, config.plateWidth + 0.2), glassMat);
+                this.group.add(dielectric);
+
+                // Dashed Box (Visual Guide)
+                const boxGeo = new THREE.BoxGeometry(config.gap + 1, config.plateHeight + 1, config.plateWidth + 1);
+                const edges = new THREE.EdgesGeometry(boxGeo);
+                // Create dashed line manually or use LineBasic with transparency? 
+                // Three.js LineDashedMaterial requires computeLineDistances()
+                const lineMat = new THREE.LineDashedMaterial({ color: 0x00ff00, dashSize: 0.2, gapSize: 0.1 });
+                const dashedBox = new THREE.LineSegments(edges, lineMat);
+                dashedBox.computeLineDistances();
+                this.group.add(dashedBox);
+
+                // Charge Sprites & Field Lines Group
+                this.effectsGroup = new THREE.Group();
+                this.group.add(this.effectsGroup);
+
+                scene.add(this.group);
+            }
+
+            updateEffects(chargeMagnitude) {
+                // Clear old effects
+                while(this.effectsGroup.children.length > 0){ 
+                    this.effectsGroup.remove(this.effectsGroup.children[0]); 
+                }
+
+                if (chargeMagnitude <= 0.1) return;
+
+                // Determine density based on charge (clamped for visual sanity)
+                const density = Math.min(Math.floor(chargeMagnitude * 1.5), 12); 
+
+                // Add Charges (+ on left, - on right)
+                const matPlus = new THREE.SpriteMaterial({ map: plusTex, transparent: true });
+                const matMinus = new THREE.SpriteMaterial({ map: minusTex, transparent: true });
+
+                for(let i=0; i<density; i++) {
+                    // Random positions on the plate face
+                    const y = (Math.random() - 0.5) * (config.plateHeight - 0.4);
+                    const z = (Math.random() - 0.5) * (config.plateWidth - 0.4);
+
+                    // Plus
+                    const s1 = new THREE.Sprite(matPlus);
+                    s1.scale.set(0.4, 0.4, 0.4);
+                    s1.position.set(-config.gap/2 + 0.3, y, z);
+                    this.effectsGroup.add(s1);
+
+                    // Minus
+                    const s2 = new THREE.Sprite(matMinus);
+                    s2.scale.set(0.4, 0.4, 0.4);
+                    s2.position.set(config.gap/2 - 0.3, y, z);
+                    this.effectsGroup.add(s2);
+
+                    // Field Line (Arrow)
+                    // From + to -
+                    const dir = new THREE.Vector3(1, 0, 0); // pointing right
+                    const origin = new THREE.Vector3(-config.gap/2 + 0.3, y, z);
+                    const length = config.gap - 0.6;
+                    const color = 0xff3333; // Red arrows
+                    const arrowHelper = new THREE.ArrowHelper(dir, origin, length, color, 0.2, 0.15);
+                    this.effectsGroup.add(arrowHelper);
+                }
+            }
+        }
+
+        // 2. Battery
+        function createBattery(pos) {
+            const batteryGroup = new THREE.Group();
+            batteryGroup.position.copy(pos);
+
+            // Body
+            const geometry = new THREE.CylinderGeometry(0.6, 0.6, 3, 32);
+            geometry.rotateZ(Math.PI / 2);
+            // Multi-material for cylinder: side, top, bottom
+            const blackMat = new THREE.MeshPhongMaterial({ color: 0x111111 });
+            const copperMat = new THREE.MeshPhongMaterial({ color: 0xb87333, shininess: 100 });
+            
+            // To make a striped battery, we can just use grouped meshes
+            // Black half
+            const negSide = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.5, 32), blackMat);
+            negSide.rotation.z = Math.PI / 2;
+            negSide.position.x = -0.75;
+            batteryGroup.add(negSide);
+
+            // Copper half
+            const posSide = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.5, 32), copperMat);
+            posSide.rotation.z = Math.PI / 2;
+            posSide.position.x = 0.75;
+            batteryGroup.add(posSide);
+
+            // Positive Nub
+            const nub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.4, 16), new THREE.MeshStandardMaterial({color: 0x888888}));
+            nub.rotation.z = Math.PI / 2;
+            nub.position.x = 1.6;
+            batteryGroup.add(nub);
+
+            // Labels
+            const vText = createTextSprite("V", 2, "#fbbf24");
+            vText.position.set(0, -1.2, 0);
+            batteryGroup.add(vText);
+
+            scene.add(batteryGroup);
+            return batteryGroup;
+        }
+
+        function createTextSprite(message, scale, colorStr) {
+            const canvas = document.createElement('canvas');
+            const size = 256;
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = colorStr;
+            ctx.font = 'bold 120px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(message, size/2, size/2);
+            
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.SpriteMaterial({ map: tex });
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(scale, scale, 1);
+            return sprite;
+        }
+
+        // 3. Wires
+        function createWire(pathPoints) {
+            const path = new THREE.CatmullRomCurve3(pathPoints);
+            // Low divisions for straight lines, but Catmull needs a few to turn corners if we used curve. 
+            // For simple sharp lines, TubeGeometry might be overkill, but looks good.
+            // Let's use simple cylinders for straight segments to get sharp 90 degree turns like the diagram
+            const material = new THREE.MeshStandardMaterial({ color: 0xc45c24, metalness: 0.6, roughness: 0.3 }); // Copper
+            
+            const group = new THREE.Group();
+            
+            for(let i=0; i<pathPoints.length-1; i++) {
+                const start = pathPoints[i];
+                const end = pathPoints[i+1];
+                const vec = new THREE.Vector3().subVectors(end, start);
+                const len = vec.length();
+                
+                const cylinder = new THREE.Mesh(new THREE.CylinderGeometry(config.wireRadius, config.wireRadius, len, 8), material);
+                
+                // Position and Rotation logic
+                cylinder.position.copy(start).add(vec.multiplyScalar(0.5));
+                cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), vec.clone().normalize());
+                
+                group.add(cylinder);
+
+                // Add corner sphere to smooth joints
+                const joint = new THREE.Mesh(new THREE.SphereGeometry(config.wireRadius, 8, 8), material);
+                joint.position.copy(start);
+                group.add(joint);
+            }
+            // Final joint
+            const lastJoint = new THREE.Mesh(new THREE.SphereGeometry(config.wireRadius, 8, 8), material);
+            lastJoint.position.copy(pathPoints[pathPoints.length-1]);
+            group.add(lastJoint);
+
+            scene.add(group);
+        }
+
+        // --- Build Scene ---
+
+        // Positions
+        const c2Pos = new THREE.Vector3(0, 2, 0);
+        const c1Pos = new THREE.Vector3(-config.spacing, 2, 0);
+        const c3Pos = new THREE.Vector3(config.spacing, 2, 0);
+        const batPos = new THREE.Vector3(0, -3, 0);
+
+        // Capacitors
+        const cap1 = new Capacitor3D('C1', c1Pos);
+        const cap2 = new Capacitor3D('C2', c2Pos);
+        const cap3 = new Capacitor3D('C3', c3Pos);
+
+        // Battery
+        const battery = createBattery(batPos);
+
+        // Wiring (Series Loop)
+        // Path: Battery(+) -> Right -> Up -> C3 -> C2 -> C1 -> Down -> Left -> Battery(-)
+        
+        // 1. Battery(+) to C3 Right Plate
+        createWire([
+            new THREE.Vector3(1.7, -3, 0),
+            new THREE.Vector3(config.spacing + config.gap/2 + 2, -3, 0), // Bottom Right Corner
+            new THREE.Vector3(config.spacing + config.gap/2 + 2, 2, 0),  // Top Right Corner height
+            new THREE.Vector3(config.spacing + config.gap/2, 2, 0)       // Connect to C3 right plate
+        ]);
+
+        // 2. C3 Left to C2 Right
+        createWire([
+            new THREE.Vector3(config.spacing - config.gap/2, 2, 0),
+            new THREE.Vector3(config.spacing/2 + config.gap/2, 2, 0) // Should verify this logic
+        ]);
+        // Wait, simple logic: C3 left is at spacing - gap/2. C2 right is at 0 + gap/2.
+        // Distance is spacing - gap. 
+        // Need to bridge the gap between capacitors.
+        // Actually, let's just draw lines between specific points.
+
+        // C3 Left -> C2 Right
+        createWire([
+            new THREE.Vector3(config.spacing - config.gap/2, 2, 0),
+            new THREE.Vector3(0 + config.gap/2, 2, 0)
+        ]);
+
+        // C2 Left -> C1 Right
+        createWire([
+            new THREE.Vector3(0 - config.gap/2, 2, 0),
+            new THREE.Vector3(-config.spacing + config.gap/2, 2, 0)
+        ]);
+
+        // C1 Left -> Battery(-)
+        createWire([
+            new THREE.Vector3(-config.spacing - config.gap/2, 2, 0),
+            new THREE.Vector3(-config.spacing - config.gap/2 - 2, 2, 0), // Top Left extension
+            new THREE.Vector3(-config.spacing - config.gap/2 - 2, -3, 0), // Down
+            new THREE.Vector3(-1.7, -3, 0) // Connect to Battery neg
+        ]);
+
+        // --- Logic & Labels ---
+        
+        const labelsContainer = document.getElementById('labels');
+
+        function createLabel(text, position, className) {
+            const div = document.createElement('div');
+            div.className = 'label ' + (className || '');
+            div.textContent = text;
+            labelsContainer.appendChild(div);
+            return { div, position };
+        }
+
+        const labelObjects = [
+            createLabel("C₁", new THREE.Vector3(-config.spacing, -0.5, 0), 'cap-label'),
+            createLabel("C₂", new THREE.Vector3(0, -0.5, 0), 'cap-label'),
+            createLabel("C₃", new THREE.Vector3(config.spacing, -0.5, 0), 'cap-label'),
+            // Voltage drops
+            createLabel("V1", new THREE.Vector3(-config.spacing, 4.2, 0), 'voltage-label'),
+            createLabel("V2", new THREE.Vector3(0, 4.2, 0), 'voltage-label'),
+            createLabel("V3", new THREE.Vector3(config.spacing, 4.2, 0), 'voltage-label'),
+        ];
+
+        function updateLabels() {
+            // Project 3D positions to 2D screen
+            labelObjects.forEach(lbl => {
+                const vec = lbl.position.clone();
+                vec.project(camera);
+                const x = (vec.x * 0.5 + 0.5) * window.innerWidth;
+                const y = (-(vec.y * 0.5) + 0.5) * window.innerHeight;
+
+                // Hide if behind camera
+                if (vec.z > 1) {
+                    lbl.div.style.display = 'none';
+                } else {
+                    lbl.div.style.display = 'block';
+                    lbl.div.style.left = `${x}px`;
+                    lbl.div.style.top = `${y}px`;
+                }
+            });
+        }
+
+        function calculatePhysics() {
+            // Get inputs
+            state.V = parseFloat(document.getElementById('input-v').value);
+            state.C1 = parseFloat(document.getElementById('input-c1').value);
+            state.C2 = parseFloat(document.getElementById('input-c2').value);
+            state.C3 = parseFloat(document.getElementById('input-c3').value);
+
+            // Series Formula: 1/Ceq = 1/C1 + 1/C2 + 1/C3
+            const invC = (1/state.C1) + (1/state.C2) + (1/state.C3);
+            state.Ceq = 1 / invC;
+
+            // Total Charge Q = Ceq * V
+            state.Q = state.Ceq * state.V;
+
+            // Voltage Drops V = Q / C
+            const v1 = state.Q / state.C1;
+            const v2 = state.Q / state.C2;
+            const v3 = state.Q / state.C3;
+
+            // Update UI Text
+            document.getElementById('val-v').innerText = state.V + " V";
+            document.getElementById('val-c1').innerText = state.C1 + " µF";
+            document.getElementById('val-c2').innerText = state.C2 + " µF";
+            document.getElementById('val-c3').innerText = state.C3 + " µF";
+
+            document.getElementById('stat-ceq').innerText = state.Ceq.toFixed(2) + " µF";
+            document.getElementById('stat-q').innerText = state.Q.toFixed(2) + " µC";
+
+            // Update Label Text for Voltages
+            labelObjects[3].div.innerText = `V₁: ${v1.toFixed(1)}V`;
+            labelObjects[4].div.innerText = `V₂: ${v2.toFixed(1)}V`;
+            labelObjects[5].div.innerText = `V₃: ${v3.toFixed(1)}V`;
+
+            // Update Visuals
+            // Pass Q to update particle density/brightness
+            cap1.updateEffects(state.Q);
+            cap2.updateEffects(state.Q);
+            cap3.updateEffects(state.Q);
+        }
+
+        // --- Interaction Listeners ---
+        document.getElementById('input-v').addEventListener('input', calculatePhysics);
+        document.getElementById('input-c1').addEventListener('input', calculatePhysics);
+        document.getElementById('input-c2').addEventListener('input', calculatePhysics);
+        document.getElementById('input-c3').addEventListener('input', calculatePhysics);
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            calculatePhysics(); // Re-calc to fix label positions if needed
+        });
+
+        // --- Animation Loop ---
+        document.getElementById('loading').style.display = 'none';
+        
+        // Initial Calc
+        calculatePhysics();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            updateLabels();
+            
+            // Pulse effect on field lines
+            const time = Date.now() * 0.005;
+            scene.traverse(obj => {
+                if(obj.type === 'ArrowHelper') {
+                    // Pulsing opacity or scale could be cool, but ArrowHelper is simple.
+                    // Let's just subtly float the charge sprites
+                }
+                if(obj.isSprite) {
+                    // Jitter charges slightly to simulate activity
+                    // obj.position.y += Math.sin(time + obj.id) * 0.002;
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+    </script>
+</body>
+</html>
