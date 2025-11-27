@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Torque Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js and OrbitControls --><script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: flex-start; align-items: flex-start; }
+        #canvas-container { 
+            width: 400px; /* Square size */
+            height: 400px; /* Square size */
+            background: #f0f4f8; 
+            margin: 20px; /* Move to left, add some margin */
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            overflow: hidden; /* Ensure content stays within square */
+        }
+        
+        /* Floating UI Panel */
+        #ui-panel {
+            position: absolute;
+            top: 20px;
+            left: 440px; /* Position to the right of the canvas */
+            width: 320px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255,255,255,0.5);
+        }
+
+        /* Formula Box */
+        #formula-box {
+            position: absolute;
+            bottom: 30px;
+            left: 440px; /* Position below the UI panel */
+            transform: none; /* Reset transform for fixed position */
+            background: #fff9c4; /* Light yellow like the sticky note */
+            padding: 15px 30px;
+            border-radius: 8px;
+            border: 2px solid #fbc02d;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            text-align: center;
+            font-size: 1.2rem;
+            pointer-events: none;
+            width: 320px; /* Match UI panel width */
+            box-sizing: border-box; /* Include padding in width */
+        }
+
+        .slider-container { margin-bottom: 15px; }
+        .slider-label { display: flex; justify-content: space-between; margin-bottom: 5px; font-weight: 600; color: #374151; }
+        .slider-value { color: #3b82f6; font-weight: 700; }
+        
+        input[type=range] {
+            width: 100%;
+            -webkit-appearance: none;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            margin-top: -6px;
+            box-shadow: 0 0 2px rgba(0,0,0,0.2);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #cbd5e1;
+            border-radius: 2px;
+        }
+        
+        .legend-item { display: flex; align-items: center; margin-top: 4px; font-size: 0.9rem; }
+        .color-box { width: 12px; height: 12px; border-radius: 3px; margin-right: 8px; }
+
+        /* Tooltip for 3D labels */
+        .label {
+            color: #000;
+            font-family: sans-serif;
+            padding: 2px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 4px;
+            pointer-events: none;
+            font-weight: bold;
+            text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 3D Canvas --><div id="canvas-container"></div>
+
+    <!-- Controls Panel --><div id="ui-panel">
+        <h2 class="text-xl font-bold mb-4 text-gray-800">Torque Controls</h2>
+        
+        <!-- Radius Slider --><div class="slider-container">
+            <div class="slider-label">
+                <span>Radius (r)</span>
+                <span id="val-r" class="slider-value">0.2 m</span>
+            </div>
+            <input type="range" id="input-r" min="0.1" max="0.5" step="0.01" value="0.2">
+        </div>
+
+        <!-- Force Slider --><div class="slider-container">
+            <div class="slider-label">
+                <span>Force (F)</span>
+                <span id="val-f" class="slider-value">50.0 N</span>
+            </div>
+            <input type="range" id="input-f" min="10" max="200" step="5" value="50">
+        </div>
+
+        <!-- Angle Slider --><div class="slider-container">
+            <div class="slider-label">
+                <span>Angle (θ)</span>
+                <span id="val-theta" class="slider-value">90°</span>
+            </div>
+            <input type="range" id="input-theta" min="0" max="180" step="1" value="90">
+        </div>
+
+        <hr class="my-4 border-gray-200">
+
+        <!-- Legend --><div>
+            <h3 class="text-sm font-semibold text-gray-500 mb-2 uppercase">Legend</h3>
+            <div class="legend-item"><div class="color-box bg-blue-500"></div>Radius Vector (\(\vec{r}\))</div>
+            <div class="legend-item"><div class="color-box bg-red-500"></div>Force Vector (\(\vec{F}\))</div>
+            <div class="legend-item"><div class="color-box bg-green-500"></div>Torque Axis (\(\vec{\tau}\))</div>
+        </div>
+    </div>
+
+    <!-- Calculation Display --><div id="formula-box">
+        <div>$$ \tau = |r| |F| \sin(\theta) $$</div>
+        <div id="calc-output" class="mt-2 font-bold text-2xl text-gray-800">
+            <!-- JS will populate this -->$$ \tau = 0.0 \text{ Nm} $$
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Scene Setup ---
+        const container = document.getElementById('canvas-container');
+        const WIDTH = container.clientWidth;
+        const HEIGHT = container.clientHeight;
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf0f4f8);
+        scene.fog = new THREE.Fog(0xf0f4f8, 1, 10); // Adjusted fog for smaller scale
+
+        const camera = new THREE.PerspectiveCamera(75, WIDTH / HEIGHT, 0.01, 100); // Increased FOV, smaller near/far
+        // Adjusted camera position to be much closer for a better initial view
+        camera.position.set(0.4, 0.3, 0.6); 
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(WIDTH, HEIGHT);
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 1.5;
+        controls.minDistance = 0.1; // Allow closer zoom
+        controls.maxDistance = 5; // Limit max zoom out
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); // Brighter ambient
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2); // Brighter directional
+        dirLight.position.set(2, 3, 2); // Closer light source
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        // Adjust shadow camera for smaller scene
+        dirLight.shadow.camera.left = -2;
+        dirLight.shadow.camera.right = 2;
+        dirLight.shadow.camera.top = 2;
+        dirLight.shadow.camera.bottom = -2;
+        dirLight.shadow.camera.near = 0.1;
+        dirLight.shadow.camera.far = 10;
+        scene.add(dirLight);
+
+        // --- Grid & Ground ---
+        // Scale down grid
+        const gridHelper = new THREE.GridHelper(5, 5, 0xcbd5e1, 0xe2e8f0);
+        scene.add(gridHelper);
+
+        const planeGeometry = new THREE.PlaneGeometry(10, 10); // Scaled down plane
+        const planeMaterial = new THREE.ShadowMaterial({ opacity: 0.15 }); // Slightly stronger shadow
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -Math.PI / 2;
+        plane.position.y = -0.01;
+        plane.receiveShadow = true;
+        scene.add(plane);
+
+        // --- Materials ---
+        const wrenchMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, roughness: 0.4, metalness: 0.6 }); // More metallic
+        const nutMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.3, metalness: 0.9 }); // More metallic
+        
+        // --- Objects Group ---
+        const simGroup = new THREE.Group();
+        scene.add(simGroup);
+
+        // 1. Nut (Hexagon) - Adjusted size to be more realistic for a wrench
+        function createNut() {
+            const geometry = new THREE.CylinderGeometry(0.015, 0.015, 0.01, 6); // Smaller nut
+            const nut = new THREE.Mesh(geometry, nutMat);
+            nut.castShadow = true;
+            nut.receiveShadow = true;
+            nut.rotation.y = Math.PI / 6;
+            return nut;
+        }
+        const nut = createNut();
+        simGroup.add(nut);
+
+        // Inner bolt thread (visual) - Scaled down
+        const boltGeo = new THREE.CylinderGeometry(0.008, 0.008, 0.012, 32);
+        const boltMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.5 });
+        const bolt = new THREE.Mesh(boltGeo, boltMat);
+        bolt.position.y = 0.005; // Adjusted Y position
+        simGroup.add(bolt);
+
+        // 2. Wrench - Adjusted sizes for realism
+        const wrenchGroup = new THREE.Group();
+        simGroup.add(wrenchGroup);
+
+        // Wrench Handle (Dynamic length)
+        // Smaller base for the handle
+        const handleGeo = new THREE.BoxGeometry(0.01, 0.005, 0.008);
+        const handle = new THREE.Mesh(handleGeo, wrenchMat);
+        handle.castShadow = true;
+        handle.position.y = 0;
+        wrenchGroup.add(handle);
+
+        // Wrench Head - Significantly scaled down and refined
+        const wrenchHeadGroup = new THREE.Group();
+        
+        // Main block of head (simplified)
+        const headBaseGeo = new THREE.BoxGeometry(0.03, 0.008, 0.035);
+        const headBase = new THREE.Mesh(headBaseGeo, wrenchMat);
+        headBase.position.set(-0.015, 0, 0); // Position relative to nut
+        wrenchHeadGroup.add(headBase);
+
+        // Jaw parts (more refined shape)
+        const jawThickness = 0.004;
+        const jawLength = 0.02;
+        const jawWidth = 0.01;
+
+        const jaw1Geo = new THREE.BoxGeometry(jawLength, jawThickness, jawWidth);
+        const jaw1 = new THREE.Mesh(jaw1Geo, wrenchMat);
+        jaw1.position.set(0.005, 0, 0.015);
+        wrenchHeadGroup.add(jaw1);
+
+        const jaw2Geo = new THREE.BoxGeometry(jawLength, jawThickness, jawWidth);
+        const jaw2 = new THREE.Mesh(jaw2Geo, wrenchMat);
+        jaw2.position.set(0.005, 0, -0.015);
+        wrenchHeadGroup.add(jaw2);
+        
+        // Add wrench head to wrench group
+        wrenchGroup.add(wrenchHeadGroup);
+        wrenchHeadGroup.position.x = -0.015; // Align correctly with nut
+        wrenchHeadGroup.position.y = 0;
+
+
+        // 3. Vectors (Helpers) - Scaled down arrow sizes
+        const arrowHeadLength = 0.02;
+        const arrowHeadWidth = 0.01;
+        
+        // Radius Arrow (Blue)
+        const rArrowDir = new THREE.Vector3(1, 0, 0);
+        const rArrowOrigin = new THREE.Vector3(0, 0.006, 0); // Slightly above wrench
+        const rArrowLen = 0.2; // Default realistic radius
+        const rArrowColor = 0x3b82f6;
+        const rArrow = new THREE.ArrowHelper(rArrowDir, rArrowOrigin, rArrowLen, rArrowColor, arrowHeadLength, arrowHeadWidth);
+        scene.add(rArrow);
+
+        // Force Arrow (Red)
+        const fArrowDir = new THREE.Vector3(0, 0, 1);
+        const fArrowOrigin = new THREE.Vector3(rArrowLen, 0.006, 0); // At tip of initial r
+        const fArrowLen = 0.03; // Default realistic force arrow length
+        const fArrowColor = 0xef4444;
+        const fArrow = new THREE.ArrowHelper(fArrowDir, fArrowOrigin, fArrowLen, fArrowColor, arrowHeadLength, arrowHeadWidth);
+        scene.add(fArrow);
+
+        // Torque Arrow (Green - Vertical)
+        const tArrowDir = new THREE.Vector3(0, 1, 0);
+        const tArrowOrigin = new THREE.Vector3(0, 0.01, 0);
+        const tArrow = new THREE.ArrowHelper(tArrowDir, tArrowOrigin, 0.1, 0x22c55e, arrowHeadLength, arrowHeadWidth); // Default torque length
+        scene.add(tArrow);
+
+        // Ghost Line (Extension of Radius for Angle visualization)
+        const lineMat = new THREE.LineDashedMaterial( { color: 0x9ca3af, dashSize: 0.01, gapSize: 0.005, opacity: 0.7, transparent: true } ); // Smaller dashes
+        const lineGeo = new THREE.BufferGeometry();
+        const ghostLine = new THREE.Line(lineGeo, lineMat);
+        scene.add(ghostLine);
+
+        // Angle Arc - Scaled down
+        const arcCurve = new THREE.EllipseCurve(
+            0, 0,            
+            0.02, 0.02, // Smaller radius           
+            0, Math.PI/2,  
+            false,            
+            0                 
+        );
+        const arcPoints = arcCurve.getPoints(50);
+        const arcGeo = new THREE.BufferGeometry().setFromPoints(arcPoints);
+        const arcMat = new THREE.LineBasicMaterial({ color: 0x8b5cf6 });
+        const angleArc = new THREE.Line(arcGeo, arcMat);
+        angleArc.rotation.x = -Math.PI / 2;
+        angleArc.position.y = 0.006; // Adjusted Y position
+        scene.add(angleArc);
+
+        // --- Logic & Updates ---
+
+        // Input Elements
+        const inputR = document.getElementById('input-r');
+        const inputF = document.getElementById('input-f');
+        const inputTheta = document.getElementById('input-theta');
+        const valR = document.getElementById('val-r');
+        const valF = document.getElementById('val-f');
+        const valTheta = document.getElementById('val-theta');
+        const calcOutput = document.getElementById('calc-output');
+
+        function updateSimulation() {
+            const r = parseFloat(inputR.value);
+            const F = parseFloat(inputF.value);
+            const thetaDeg = parseFloat(inputTheta.value);
+            const thetaRad = thetaDeg * (Math.PI / 180);
+
+            valR.innerText = `${r.toFixed(2)} m`; // Two decimal places for radius
+            valF.innerText = `${F.toFixed(1)} N`;
+            valTheta.innerText = `${thetaDeg}°`;
+
+            const torque = r * F * Math.sin(thetaRad);
+            
+            const formulaHTML = `$$ \\tau = ${r.toFixed(2)} \\times ${F.toFixed(1)} \\times \\sin(${thetaDeg}^\\circ) = ${torque.toFixed(2)} \\text{ Nm} $$`;
+            calcOutput.innerHTML = formulaHTML;
+            if(window.MathJax) {
+                MathJax.typesetPromise([calcOutput]);
+            }
+
+            // --- 3D Updates ---
+            // 1. Update Wrench Geometry
+            // Assuming r is the distance from the center of the nut to the point of force application
+            const wrenchHandleStartOffset = 0.02; // Small offset for the head portion
+            const actualHandleLength = Math.max(0.01, r - wrenchHandleStartOffset); // Length of the visible handle section
+
+            // Scale handle based on the effective length
+            handle.scale.set(actualHandleLength / 0.01, 1, 1); // Scale factor relative to base handle width (0.01)
+            handle.position.set(wrenchHandleStartOffset + actualHandleLength / 2, 0, 0); // Position the handle correctly
+
+            // Position the wrench head relative to the pivot (nut)
+            wrenchHeadGroup.position.x = -0.015; // Kept as before, relative to the pivot
+
+            // 2. Update Radius Arrow
+            rArrow.setLength(r, arrowHeadLength, arrowHeadWidth);
+            
+            // 3. Update Force Arrow
+            fArrow.position.set(r, 0.006, 0); // Position at the end of the radius vector
+            
+            const dirX = Math.cos(thetaRad);
+            const dirZ = Math.sin(thetaRad);
+            
+            const newDir = new THREE.Vector3(dirX, 0, dirZ).normalize();
+            fArrow.setDirection(newDir);
+            fArrow.setLength(F * 0.0008 + 0.01, arrowHeadLength, arrowHeadWidth); // Scale visual force arrow length
+            // F * (visual scale factor) + min_length
+
+            // 4. Ghost Line (Extension of r)
+            const points = [];
+            points.push(new THREE.Vector3(r, 0.006, 0));
+            points.push(new THREE.Vector3(r + 0.1, 0.006, 0)); // Extend a bit further for visual
+            lineGeo.setFromPoints(points);
+            ghostLine.computeLineDistances();
+
+            // 5. Angle Arc
+            if (thetaRad > 0.05) { // Show arc if angle is significant
+                angleArc.visible = true;
+                const arcRadius = 0.02; // Small arc radius
+                const arcCurveUpdate = new THREE.EllipseCurve(
+                    r, 0,             
+                    arcRadius, arcRadius,           
+                    0, thetaRad,        
+                    false, 0
+                );
+                const pts = arcCurveUpdate.getPoints(30);
+                const mappedPts = pts.map(p => new THREE.Vector3(p.x, 0.006, p.y));
+                arcGeo.setFromPoints(mappedPts);
+            } else {
+                angleArc.visible = false;
+            }
+
+            // 6. Torque Vector
+            const torqueVisualLen = Math.abs(torque) * 0.01; // Scale torque visually
+            tArrow.setLength(Math.max(0.01, torqueVisualLen), arrowHeadLength, arrowHeadWidth);
+            
+            if (dirZ > 0) { // Standard right-hand rule
+                 tArrow.setDirection(new THREE.Vector3(0, -1, 0)); // Clockwise torque is generally into the page / down Y
+            } else {
+                 tArrow.setDirection(new THREE.Vector3(0, 1, 0)); // Counter-clockwise torque is out of the page / up Y
+            }
+
+            tArrow.setColor(new THREE.Color().setHSL(0.3, 1, 0.5));
+            
+        }
+
+        // Event Listeners
+        inputR.addEventListener('input', updateSimulation);
+        inputF.addEventListener('input', updateSimulation);
+        inputTheta.addEventListener('input', updateSimulation);
+
+        updateSimulation(); // Initial call
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            const newWidth = container.clientWidth;
+            const newHeight = container.clientHeight;
+            camera.aspect = newWidth / newHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(newWidth, newHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
