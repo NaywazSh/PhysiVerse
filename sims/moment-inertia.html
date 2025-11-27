@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Moment of Inertia Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js Library --><script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls for interactivity (rotation, zoom) --><script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        /* Custom CSS for the simulation canvas and layout */
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            display: flex;
+            background-color: #0d1117; /* Dark background */
+        }
+        #simulation-container {
+            flex-grow: 1;
+            height: 100vh;
+        }
+        #control-panel {
+            width: 250px; /* Reduced width from 300px */
+            background-color: #161b22;
+            color: #c9d1d9;
+            padding: 10px; /* Reduced from 15px */
+            box-shadow: -4px 0 10px rgba(0, 0, 0, 0.5);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px; /* Reduced from 10px */
+        }
+        .control-group {
+            padding: 6px; /* Reduced from 8px */
+            border-radius: 6px; /* Slightly smaller border-radius */
+            background-color: #21262d;
+        }
+        .input-label {
+            display: block;
+            margin-bottom: 3px; /* Reduced from 4px */
+            font-weight: 600;
+            font-size: 0.85rem; /* Further reduced label text size */
+        }
+        input[type="range"], input[type="number"] {
+            width: 100%;
+            padding: 3px; /* Reduced from 4px */
+            border-radius: 3px; /* Slightly smaller border-radius */
+            border: 1px solid #30363d;
+            background-color: #0d1117;
+            color: #c9d1d9;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+            font-size: 0.8rem; /* Further reduced input text size */
+        }
+        select {
+            width: 100%;
+            padding: 5px; /* Reduced from 6px */
+            border-radius: 3px;
+            border: 1px solid #30363d;
+            background-color: #0d1117;
+            color: #c9d1d9;
+            appearance: none;
+            cursor: pointer;
+            font-size: 0.85rem; /* Further reduced select text size */
+        }
+        .formula-box {
+            background-color: #30363d;
+            padding: 8px; /* Reduced from 10px */
+            border-radius: 6px;
+            text-align: center;
+            font-size: 0.9rem; /* Reduced from 1rem */
+            min-height: 80px; /* Reduced from 100px */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            flex-shrink: 0; /* Prevent it from shrinking more than min-height */
+        }
+        .formula-box h3 {
+            font-size: 1rem; /* Reduced from 1.1rem */
+            font-weight: 700;
+            margin-bottom: 4px; /* Reduced from 5px */
+            color: #58a6ff;
+        }
+        .formula-text {
+            font-family: monospace;
+            font-size: 0.9rem; /* Reduced from 1.1rem */
+            color: #ffffff;
+            line-height: 1.4; /* Reduced from 1.5 */
+            padding: 2px 0; /* Reduced from 3px 0 */
+        }
+        #inertia-result {
+            font-size: 0.95rem; /* Adjusted for smaller text */
+            margin-top: 5px; /* Adjusted margin */
+        }
+
+        /* Responsive adjustments for mobile */
+        @media (max-width: 768px) {
+            body {
+                flex-direction: column;
+            }
+            #control-panel {
+                width: 100%;
+                height: 250px; /* Further reduced height for mobile */
+                order: 1; /* Move controls to top */
+                box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+            }
+            #simulation-container {
+                height: calc(100vh - 250px); /* Adjust height */
+                order: 2;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="control-panel">
+        <h2 class="text-lg font-bold text-center text-white mb-2">Moment of Inertia (I)</h2> <!-- Reduced font size and margin --><div class="control-group">
+            <label for="shape-select" class="input-label">Select Object:</label>
+            <select id="shape-select"></select>
+        </div>
+
+        <div class="control-group">
+            <label for="mass-input" class="input-label">Mass (M) kg:</label>
+            <input type="range" id="mass-input" min="1" max="10" step="0.5" value="5">
+            <input type="number" id="mass-display" min="1" max="10" step="0.5" value="5">
+        </div>
+
+        <div class="control-group" id="radius-control">
+            <label for="radius-input" class="input-label">Radius (R) m:</label>
+            <input type="range" id="radius-input" min="0.5" max="5" step="0.1" value="2">
+            <input type="number" id="radius-display" min="0.5" max="5" step="0.1" value="2">
+        </div>
+
+        <div class="control-group" id="length-control" style="display: none;">
+            <label for="length-input" class="input-label">Length (L) m:</label>
+            <input type="range" id="length-input" min="1" max="10" step="0.5" value="6">
+            <input type="number" id="length-display" min="1" max="10" step="0.5" value="6">
+        </div>
+
+        <div class="control-group" id="radii-control" style="display: none;">
+            <label for="r1-input" class="input-label">Inner Radius (R₁):</label>
+            <input type="range" id="r1-input" min="0.5" max="2" step="0.1" value="1">
+            <input type="number" id="r1-display" min="0.5" max="2" step="0.1" value="1">
+
+            <label for="r2-input" class="input-label mt-2">Outer Radius (R₂):</label> <!-- Adjusted margin-top --><input type="range" id="r2-input" min="2.1" max="5" step="0.1" value="3">
+            <input type="number" id="r2-display" min="2.1" max="5" step="0.1" value="3">
+        </div>
+
+        <div class="control-group" id="slab-control" style="display: none;">
+            <label for="a-input" class="input-label">Slab Side (a):</label>
+            <input type="range" id="a-input" min="2" max="10" step="0.5" value="4">
+            <input type="number" id="a-display" min="2" max="10" step="0.5" value="4">
+
+            <label for="b-input" class="input-label mt-2">Slab Side (b):</label> <!-- Adjusted margin-top --><input type="range" id="b-input" min="2" max="10" step="0.5" value="8">
+            <input type="number" id="b-display" min="2" max="10" step="0.5" value="8">
+        </div>
+
+        <div class="formula-box">
+            <h3>Formula:</h3>
+            <div id="formula-text" class="formula-text"></div>
+            <div id="inertia-result" class="text-lg mt-3 text-green-400"></div>
+        </div>
+    </div>
+
+    <div id="simulation-container">
+        <!-- The Three.js canvas will be injected here --></div>
+
+    <script>
+        // --- Firebase Configuration (Required for the Canvas environment) ---
+        // This is a placeholder structure, the actual values are injected at runtime
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+
+        // Three.js global variables
+        let scene, camera, renderer, controls;
+        let objectMesh = null;
+        let axisMesh = null;
+        let axisLine = null;
+
+        // Encapsulate all changing physical parameters into a state object
+        const state = {
+            M: 5, // Mass (M)
+            R: 2, // Radius (R)
+            L: 6, // Length (L)
+            R1: 1, // Inner Radius (R1)
+            R2: 3, // Outer Radius (R2)
+            A: 4, // Slab side A
+            B: 8, // Slab side B
+        };
+
+        // Data structure matching the uploaded image and formulas
+        const shapes = [
+            // Use state.M, state.R, etc. in calculations
+            { id: 'hoop_central', name: 'Hoop (Central Axis)', formula: 'I = M R²', calc: () => state.M * state.R * state.R, creator: createHoop, params: ['R'] },
+            { id: 'annular_cylinder', name: 'Annular Cylinder (Ring)', formula: 'I = ½ M (R₁² + R₂²)', calc: () => 0.5 * state.M * (state.R1 * state.R1 + state.R2 * state.R2), creator: createAnnularCylinder, params: ['R1', 'R2'] },
+            { id: 'solid_cylinder_central', name: 'Solid Cylinder (Central Axis)', formula: 'I = ½ M R²', calc: () => 0.5 * state.M * state.R * state.R, creator: createSolidCylinder, params: ['R'] },
+            { id: 'solid_cylinder_diameter', name: 'Solid Cylinder (Diameter)', formula: 'I = ¼ M R² + ¹⁄₁₂ M L²', calc: () => 0.25 * state.M * state.R * state.R + (1 / 12) * state.M * state.L * state.L, creator: createSolidCylinderDiameter, params: ['R', 'L'] },
+            { id: 'thin_rod', name: 'Thin Rod (Center, Perpendicular)', formula: 'I = ¹⁄₁₂ M L²', calc: () => (1 / 12) * state.M * state.L * state.L, creator: createThinRod, params: ['L'] },
+            { id: 'solid_sphere', name: 'Solid Sphere (Any Diameter)', formula: 'I = ⅖ M R²', calc: () => (2 / 5) * state.M * state.R * state.R, creator: createSolidSphere, params: ['R'] },
+            { id: 'thin_spherical_shell', name: 'Thin Spherical Shell (Any Diameter)', formula: 'I = ⅔ M R²', calc: () => (2 / 3) * state.M * state.R * state.R, creator: createThinSphericalShell, params: ['R'] },
+            { id: 'hoop_diameter', name: 'Hoop (About Diameter)', formula: 'I = ½ M R²', calc: () => 0.5 * state.M * state.R * state.R, creator: createHoopDiameter, params: ['R'] },
+            { id: 'slab', name: 'Slab (Perpendicular Axis)', formula: 'I = ¹⁄₁₂ M (a² + b²)', calc: () => (1 / 12) * state.M * (state.A * state.A + state.B * state.B), creator: createSlab, params: ['A', 'B'] },
+        ];
+
+        let currentShape = shapes[0];
+
+        // Utility to convert degrees to radians
+        const toRad = (degrees) => degrees * (Math.PI / 180);
+
+        // --- Three.js Initialization ---
+
+        function init() {
+            const container = document.getElementById('simulation-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            // 1. Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1e2a38); // Dark blue-grey
+
+            // 2. Camera (Perspective)
+            camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+            camera.position.set(0, 5, 10);
+
+            // 3. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(width, height);
+            container.appendChild(renderer.domElement);
+
+            // 4. Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 10, 7.5);
+            scene.add(directionalLight);
+
+            // 5. OrbitControls (Rotation, Zoom)
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; // smooth rotation
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 5;
+            controls.maxDistance = 50;
+
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Initial setup
+            populateShapeSelect();
+            updateSimulation();
+            animate();
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('simulation-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        }
+
+        // --- Object Creation Functions (Matching Shapes in the Image) ---
+
+        function clearScene() {
+            if (objectMesh) scene.remove(objectMesh);
+            if (axisMesh) scene.remove(axisMesh);
+            if (axisLine) scene.remove(axisLine);
+            objectMesh = null;
+            axisMesh = null;
+            axisLine = null;
+        }
+
+        function createAxis(orientation = 'Y') {
+            const length = 10;
+            const color = 0xff0000; // Red for the axis
+
+            // 1. Line Geometry for the axis
+            const points = [];
+            points.push(new THREE.Vector3(0, -length / 2, 0));
+            points.push(new THREE.Vector3(0, length / 2, 0));
+            axisLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), new THREE.LineBasicMaterial({ color: color }));
+
+            // 2. Cone/Arrowhead at the end (optional)
+            const arrowheadGeometry = new THREE.ConeGeometry(0.2, 0.5, 32);
+            const arrowheadMaterial = new THREE.MeshBasicMaterial({ color: color });
+            axisMesh = new THREE.Mesh(arrowheadGeometry, arrowheadMaterial);
+            axisMesh.position.y = length / 2;
+
+            const axisGroup = new THREE.Group();
+            axisGroup.add(axisLine);
+            axisGroup.add(axisMesh);
+
+            // Rotate the axis according to the required orientation
+            if (orientation === 'X') {
+                axisGroup.rotation.z = toRad(90);
+            } else if (orientation === 'Z') {
+                 axisGroup.rotation.x = toRad(90);
+            }
+
+            scene.add(axisGroup);
+            return axisGroup;
+        }
+
+        // (a) Hoop about central axis (Y-axis)
+        function createHoop() {
+            const R = state.R;
+            const thickness = 0.5;
+
+            const geometry = new THREE.TorusGeometry(R, thickness / 2, 16, 100);
+            const material = new THREE.MeshPhongMaterial({ color: 0xcc3333, side: THREE.DoubleSide });
+            objectMesh = new THREE.Mesh(geometry, material);
+
+            // Align axis with object center (Y-axis for central axis)
+            createAxis('Y');
+
+            // Rotate hoop so its normal is along Y
+            objectMesh.rotation.x = toRad(90);
+
+            scene.add(objectMesh);
+            return objectMesh;
+        }
+
+        // (b) Annular cylinder (or ring) about central axis (Y-axis)
+        function createAnnularCylinder() {
+            const R1 = state.R1;
+            const R2 = state.R2;
+            const height = state.L; // Using L for height here
+            
+            // Create the solid outer cylinder
+            const geometry = new THREE.CylinderGeometry(R2, R2, height, 50, 1, false, 0, Math.PI * 2);
+            const material = new THREE.MeshPhongMaterial({ color: 0xcc3333, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+            objectMesh = new THREE.Mesh(geometry, material);
+
+            // Create a hole in the middle (subtracting the inner cylinder)
+            const holeGeometry = new THREE.CylinderGeometry(R1, R1, height + 0.01, 50);
+            const holeMesh = new THREE.Mesh(holeGeometry, new THREE.MeshBasicMaterial({ color: 0x1e2a38 })); // Match background
+            objectMesh.add(holeMesh);
+
+            // Align axis with object center (Y-axis)
+            createAxis('Y');
+            scene.add(objectMesh);
+            return objectMesh;
+        }
+
+        // (c) Solid cylinder (or disk) about central axis (Y-axis)
+        function createSolidCylinder() {
+            const R = state.R;
+            const height = state.L;
+            const geometry = new THREE.CylinderGeometry(R, R, height, 50);
+            const material = new THREE.MeshPhongMaterial({ color: 0xcc3333 });
+            objectMesh = new THREE.Mesh(geometry, material);
+
+            createAxis('Y');
+            scene.add(objectMesh);
+            return objectMesh;
+        }
+
+        // (d) Solid cylinder (or disk) about central diameter (X-axis)
+        function createSolidCylinderDiameter() {
+            const R = state.R;
+            const height = state.L;
+            const geometry = new THREE.CylinderGeometry(R, R, height, 50);
+            const material = new THREE.MeshPhongMaterial({ color: 0xcc3333 });
+            objectMesh = new THREE.Mesh(geometry, material);
+
+            // Rotate the cylinder so its long axis (L) is along Z, and the diameter is along X/Y
+            // Current orientation (L along Y) means rotating by 90deg puts L along X or Z.
+            objectMesh.rotation.x = toRad(90);
+
+            // The axis of rotation is the diameter, here aligned with the X-axis
+            createAxis('X');
+
+            scene.add(objectMesh);
+            return objectMesh;
+        }
+
+        // (e) Thin rod about axis through center perpendicular to length (Y-axis)
+        function createThinRod() {
+            const length = state.L;
+            const radius = 0.2; // Very thin
+            const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
+            const material = new THREE.MeshPhongMaterial({ color: 0xcc3333 });
+            objectMesh = new THREE.Mesh(geometry, material);
+
+            // Align rod length along X-axis
+            objectMesh.rotation.z = toRad(90);
+
+            // The axis of rotation is the Y-axis (perpendicular to length)
+            createAxis('Y');
+
+            scene.add(objectMesh);
+            return objectMesh;
+        }
+
+        // (f) Solid sphere about any diameter (Y-axis)
+        function createSolidSphere() {
+            const R = state.R;
+            const geometry = new THREE.SphereGeometry(R, 32, 32);
+            const material = new THREE.MeshPhongMaterial({ color: 0xcc3333 });
+            objectMesh = new THREE.Mesh(geometry, material);
+
+            // The axis of rotation is the Y-axis (diameter)
+            createAxis('Y');
+
+            scene.add(objectMesh);
+            return objectMesh;
+        }
+
+        // (g) Thin spherical shell about any diameter (Y-axis)
+        function createThinSphericalShell() {
+            const R = state.R;
+            // Create a shell by using a single-sided material and rendering only the back face (or just using a transparent material)
+            const geometry = new THREE.SphereGeometry(R, 32, 32);
+            const material = new THREE.MeshPhongMaterial({ color: 0xcc3333, side: THREE.DoubleSide, transparent: true, opacity: 0.8 }); 
+            objectMesh = new THREE.Mesh(geometry, material);
+
+            // The axis of rotation is the Y-axis (diameter)
+            createAxis('Y');
+
+            scene.add(objectMesh);
+            return objectMesh;
+        }
+
+        // (h) Hoop about any diameter (X-axis)
+        function createHoopDiameter() {
+            const R = state.R;
+            const thickness = 0.5;
+            const geometry = new THREE.TorusGeometry(R, thickness / 2, 16, 100);
+            const material = new THREE.MeshPhongMaterial({ color: 0xcc3333, side: THREE.DoubleSide });
+            objectMesh = new THREE.Mesh(geometry, material);
+
+            // Hoop normal is along Y, the diameter is along X
+            objectMesh.rotation.x = toRad(90);
+
+            // The axis of rotation is the X-axis (diameter)
+            createAxis('X');
+
+            scene.add(objectMesh);
+            return objectMesh;
+        }
+
+        // (i) Slab about perpendicular axis through center (Y-axis)
+        function createSlab() {
+            const A = state.A;
+            const B = state.B;
+            const depth = 0.5; // Thickness (often T in formula, but here it's negligible)
+            const geometry = new THREE.BoxGeometry(A, depth, B);
+            const material = new THREE.MeshPhongMaterial({ color: 0xcc3333 });
+            objectMesh = new THREE.Mesh(geometry, material);
+
+            // The axis of rotation is the Y-axis (perpendicular through center)
+            createAxis('Y');
+
+            scene.add(objectMesh);
+            return objectMesh;
+        }
+
+        // --- Logic and UI Functions ---
+
+        function populateShapeSelect() {
+            const select = document.getElementById('shape-select');
+            shapes.forEach(shape => {
+                const option = document.createElement('option');
+                option.value = shape.id;
+                option.textContent = shape.name;
+                select.appendChild(option);
+            });
+            select.addEventListener('change', (e) => {
+                currentShape = shapes.find(s => s.id === e.target.value);
+                updateSimulation();
+            });
+        }
+
+        function updateSimulation() {
+            clearScene();
+            // Call the creator function for the current shape
+            currentShape.creator();
+            updateControlsVisibility();
+            updateInertiaCalculation();
+        }
+
+        function updateInertiaCalculation() {
+            // Update the formula text
+            document.getElementById('formula-text').innerHTML = currentShape.formula;
+
+            // Calculate I
+            const I = currentShape.calc();
+
+            // Update the result display
+            document.getElementById('inertia-result').textContent = `I ≈ ${I.toFixed(3)} kg·m²`;
+
+            // Optional: Rotate the object/axis continuously to show the axis of rotation
+            if (objectMesh) {
+                // Add a gentle, continuous rotation around the current axis of rotation (Y for most, X for others)
+                objectMesh.userData.rotationSpeed = 0.01;
+            }
+        }
+
+        function updateControlsVisibility() {
+            document.getElementById('radius-control').style.display = 'none';
+            document.getElementById('length-control').style.display = 'none';
+            document.getElementById('radii-control').style.display = 'none';
+            document.getElementById('slab-control').style.display = 'none';
+
+            // Show controls relevant to the current shape's parameters
+            if (currentShape.params.includes('R')) {
+                document.getElementById('radius-control').style.display = 'block';
+            }
+            if (currentShape.params.includes('L')) {
+                document.getElementById('length-control').style.display = 'block';
+            }
+            if (currentShape.params.includes('R1') && currentShape.params.includes('R2')) {
+                document.getElementById('radii-control').style.display = 'block';
+            }
+            if (currentShape.params.includes('A') && currentShape.params.includes('B')) {
+                document.getElementById('slab-control').style.display = 'block';
+            }
+        }
+
+        // --- Input Handling ---
+
+        function setupInputListeners() {
+            // Mass (M)
+            const massInput = document.getElementById('mass-input');
+            const massDisplay = document.getElementById('mass-display');
+            [massInput, massDisplay].forEach(el => el.addEventListener('input', (e) => {
+                state.M = parseFloat(e.target.value);
+                massInput.value = state.M;
+                massDisplay.value = state.M;
+                updateInertiaCalculation();
+            }));
+
+            // Radius (R)
+            const radiusInput = document.getElementById('radius-input');
+            const radiusDisplay = document.getElementById('radius-display');
+            [radiusInput, radiusDisplay].forEach(el => el.addEventListener('input', (e) => {
+                state.R = parseFloat(e.target.value);
+                radiusInput.value = state.R;
+                radiusDisplay.value = state.R;
+                // Re-draw shape if a size parameter changes
+                if (currentShape.params.includes('R')) updateSimulation();
+            }));
+
+            // Length (L)
+            const lengthInput = document.getElementById('length-input');
+            const lengthDisplay = document.getElementById('length-display');
+            [lengthInput, lengthDisplay].forEach(el => el.addEventListener('input', (e) => {
+                state.L = parseFloat(e.target.value);
+                lengthInput.value = state.L;
+                lengthDisplay.value = state.L;
+                if (currentShape.params.includes('L')) updateSimulation();
+            }));
+
+            // Annular Radii (R1, R2)
+            const r1Input = document.getElementById('r1-input');
+            const r1Display = document.getElementById('r1-display');
+            [r1Input, r1Display].forEach(el => el.addEventListener('input', (e) => {
+                state.R1 = parseFloat(e.target.value);
+                r1Input.value = state.R1;
+                r1Display.value = state.R1;
+                if (currentShape.params.includes('R1')) updateSimulation();
+            }));
+            const r2Input = document.getElementById('r2-input');
+            const r2Display = document.getElementById('r2-display');
+            [r2Input, r2Display].forEach(el => el.addEventListener('input', (e) => {
+                state.R2 = parseFloat(e.target.value);
+                r2Input.value = state.R2;
+                r2Display.value = state.R2;
+                if (currentShape.params.includes('R2')) updateSimulation();
+            }));
+
+            // Slab Sides (A, B)
+            const aInput = document.getElementById('a-input');
+            const aDisplay = document.getElementById('a-display');
+            [aInput, aDisplay].forEach(el => el.addEventListener('input', (e) => {
+                state.A = parseFloat(e.target.value);
+                aInput.value = state.A;
+                aDisplay.value = state.A;
+                if (currentShape.params.includes('A')) updateSimulation();
+            }));
+            const bInput = document.getElementById('b-input');
+            const bDisplay = document.getElementById('b-display');
+            [bInput, bDisplay].forEach(el => el.addEventListener('input', (e) => {
+                state.B = parseFloat(e.target.value);
+                bInput.value = state.B;
+                bDisplay.value = state.B;
+                if (currentShape.params.includes('B')) updateSimulation();
+            }));
+        }
+
+        // --- Animation Loop ---
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Update controls (handles mouse/touch rotation and zoom)
+            controls.update();
+
+            // Apply continuous rotation to the object mesh for visual effect
+            if (objectMesh && objectMesh.userData.rotationSpeed) {
+                // Determine the primary axis of rotation based on the current shape
+                let axis = new THREE.Vector3(0, 1, 0); // Default to Y
+                if (['solid_cylinder_diameter', 'hoop_diameter'].includes(currentShape.id)) {
+                    axis = new THREE.Vector3(1, 0, 0); // X-axis for diameter rotations
+                }
+
+                // Since OrbitControls already handles the rotation, we just need to make the object spin around its fixed axis
+                if (axis.y === 1) { // Y-axis rotation
+                    objectMesh.rotation.y += objectMesh.userData.rotationSpeed;
+                    // Rotate axis visualization as well
+                    if (axisLine) axisLine.parent.rotation.y += objectMesh.userData.rotationSpeed;
+                } else if (axis.x === 1) { // X-axis rotation
+                    objectMesh.rotation.x += objectMesh.userData.rotationSpeed;
+                    // Rotate axis visualization as well
+                    if (axisLine) axisLine.parent.rotation.x += objectMesh.userData.rotationSpeed;
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- Start the App ---
+        window.onload = function () {
+            // Optional: Log level for Firebase debugging if used later
+            // if (typeof firebase !== 'undefined') firebase.firestore.setLogLevel('Debug');
+
+            init();
+            setupInputListeners();
+        };
+
+    </script>
+</body>
+</html>
