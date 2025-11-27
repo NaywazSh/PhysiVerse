@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photoelectric Effect 3D Simulation</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- KaTeX CDNs for formula rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" xintegrity="sha384-nKqI3pP+uR4wL+p/hQ0c0eD0M5n3K/9mE6sP/YF3d48K6lG2h/4d08F00pQJ6W8w5" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" xintegrity="sha384-W8F7Gg/2E6+Q/k8S/p+bB8t5qVqG5E8O3m/v1P5X6w4O0pQJ6W8w5" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" xintegrity="sha384-y0Y1+Q331P6B6K4C0E5Q3+g6x4d4c1B0r2l8l4t38N5E80F00pQJ6W8w5" crossorigin="anonymous"></script>
+    
+    <style>
+        /* Custom CSS for 3D look and feel */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* Dark background for space effect */
+            color: #f3f4f6;
+            overflow: hidden;
+        }
+        #simulation-container {
+            position: relative;
+            width: 100%;
+            height: calc(100vh - 180px); /* Leave space for controls */
+            min-height: 400px;
+        }
+        canvas {
+            display: block;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 0;
+        }
+        .slider {
+            -webkit-appearance: none;
+            width: 70%;
+            height: 8px;
+            border-radius: 4px;
+            background: #4b5563;
+            outline: none;
+            opacity: 0.8;
+            transition: opacity .15s;
+        }
+        .slider:hover {
+            opacity: 1;
+        }
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #3b82f6; /* Blue thumb */
+            cursor: pointer;
+            box-shadow: 0 0 5px #3b82f6;
+        }
+        /* Style for KaTeX rendered math to ensure contrast */
+        .katex {
+            color: #d1d5db; /* Light gray for formulas */
+        }
+    </style>
+</head>
+<body>
+
+    <div class="p-4 md:p-6 bg-gray-900 shadow-xl">
+        <h1 class="text-3xl font-bold text-center text-indigo-400 mb-2">Photoelectric Effect 3D Simulator</h1>
+        <!-- Updated description text with KaTeX delimiters ($...$) -->
+        <p class="text-center text-gray-400 text-sm mb-4">Observe how light's energy $E=hf$ and intensity, relative to the metal's work function $\phi$, determine electron ejection $K_{max} = hf - \phi$.</p>
+
+        <!-- Controls Panel -->
+        <div class="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 p-3 bg-gray-800 rounded-xl shadow-inner border border-gray-700">
+            <!-- Frequency Control -->
+            <div class="control-group">
+                <!-- Updated label text with KaTeX delimiters ($...$) -->
+                <label for="frequency" class="text-sm font-medium w-1/4">Frequency $f$:</label>
+                <input type="range" id="frequency" min="1" max="10" step="0.1" value="6" class="slider" oninput="updateSimulation()">
+                <span id="frequency-value" class="w-1/6 text-right text-indigo-300 font-semibold">6.0</span>
+            </div>
+
+            <!-- Intensity Control -->
+            <div class="control-group">
+                <!-- Updated label text with KaTeX delimiters ($...$) -->
+                <label for="intensity" class="text-sm font-medium w-1/4">Intensity $I$:</label>
+                <input type="range" id="intensity" min="0.1" max="1.5" step="0.1" value="0.8" class="slider" oninput="updateSimulation()">
+                <span id="intensity-value" class="w-1/6 text-right text-yellow-300 font-semibold">0.8</span>
+            </div>
+
+            <!-- Work Function Control -->
+            <div class="control-group">
+                <!-- Updated label text with KaTeX delimiters ($...$) -->
+                <label for="work-function" class="text-sm font-medium w-1/4">Work $\phi$:</label>
+                <input type="range" id="work-function" min="1" max="10" step="0.1" value="4" class="slider" oninput="updateSimulation()">
+                <span id="work-function-value" class="w-1/6 text-right text-red-300 font-semibold">4.0</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3D Simulation Container -->
+    <div id="simulation-container"></div>
+
+    <script type="module">
+        // --- Firebase Globals (Required by instructions, but not used in this physics simulation) ---
+        // Using 'var' to prevent ReferenceError in module scope environment.
+        var __app_id = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        var __firebase_config = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+        var __initial_auth_token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        console.log(`App ID: ${__app_id}`);
+
+        // --- Simulation Constants (Conceptual Units) ---
+        const h = 1.0; // Planck's constant (normalized)
+        const CATHODE_X = -50;
+        const ANODE_X = 50;
+        const Z_DEPTH = 30;
+
+
+        // --- Three.js Setup ---
+        let scene, camera, renderer, lightSource, container;
+        const photons = [];
+        const electrons = [];
+        let simulationReady = false;
+
+        function init() {
+            container = document.getElementById('simulation-container');
+            if (!container) return;
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a0a); // Deep dark background
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(0, 0, 100);
+            camera.lookAt(0, 0, 0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Add main 3D elements
+            createSetup();
+
+            simulationReady = true;
+        }
+
+        function onWindowResize() {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        // --- 3D Element Creation ---
+        function createSetup() {
+            // Frame/Rails
+            const railGeo = new THREE.CylinderGeometry(2, 2, 120, 32);
+            const railMat = new THREE.MeshPhongMaterial({ color: 0x8b0000 }); // Dark Red
+            const rail1 = new THREE.Mesh(railGeo, railMat);
+            rail1.position.set(CATHODE_X, -40, Z_DEPTH / 2);
+            rail1.rotation.z = Math.PI / 2;
+            scene.add(rail1);
+
+            const rail2 = new THREE.Mesh(railGeo, railMat);
+            rail2.position.set(ANODE_X, -40, Z_DEPTH / 2);
+            rail2.rotation.z = Math.PI / 2;
+            scene.add(rail2);
+
+            // Cathode (Emitting Plate) - Negative
+            const cathodeGeo = new THREE.BoxGeometry(4, 30, Z_DEPTH);
+            const cathodeMat = new THREE.MeshLambertMaterial({ color: 0xaaaaaa, emissive: 0x444444, transparent: true, opacity: 0.9 });
+            const cathode = new THREE.Mesh(cathodeGeo, cathodeMat);
+            cathode.position.set(CATHODE_X, 0, 0);
+            scene.add(cathode);
+
+            // Anode (Collecting Plate) - Positive
+            const anodeGeo = new THREE.BoxGeometry(4, 30, Z_DEPTH);
+            const anodeMat = new THREE.MeshLambertMaterial({ color: 0xaaaaaa, emissive: 0x444444, transparent: true, opacity: 0.9 });
+            const anode = new THREE.Mesh(anodeGeo, anodeMat);
+            anode.position.set(ANODE_X, 0, 0);
+            scene.add(anode);
+
+            // Light Source (Bulb)
+            const bulbGeo = new THREE.SphereGeometry(8, 32, 32);
+            // Dynamic color based on frequency will be applied later
+            const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 });
+            lightSource = new THREE.Mesh(bulbGeo, bulbMat);
+            lightSource.position.set(0, 30, 0);
+            scene.add(lightSource);
+
+            // Ambient Light
+            const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+            scene.add(ambientLight);
+
+            // Point Light at the source position for glow
+            const pointLight = new THREE.PointLight(0xffffff, 2, 200);
+            pointLight.position.copy(lightSource.position);
+            scene.add(pointLight);
+        }
+
+        // --- Photon (Light) Logic ---
+        function createPhoton(frequencyValue) {
+            const energy = h * frequencyValue;
+            const color = getFrequencyColor(frequencyValue);
+            
+            // Sphere to represent the particle nature
+            const geo = new THREE.SphereGeometry(1.5, 8, 8);
+            const mat = new THREE.MeshBasicMaterial({ color: color });
+            const photon = new THREE.Mesh(geo, mat);
+
+            // Start position is near the light source
+            photon.position.set(
+                lightSource.position.x + (Math.random() - 0.5) * 5,
+                lightSource.position.y - 10,
+                lightSource.position.z + (Math.random() - 0.5) * 5
+            );
+            
+            // Store properties
+            photon.energy = energy;
+            photon.hitTime = 0; // For wave animation
+            photon.colorValue = color;
+            
+            // Direction towards the cathode (CATHODE_X, random Y, random Z)
+            photon.velocity = new THREE.Vector3(
+                (CATHODE_X - photon.position.x) / 100,
+                (Math.random() - 0.5) * 0.1,
+                (Math.random() - 0.5) * 0.1
+            );
+            
+            scene.add(photon);
+            photons.push(photon);
+        }
+
+        function updatePhotons(delta) {
+            for (let i = photons.length - 1; i >= 0; i--) {
+                const p = photons[i];
+                p.position.add(p.velocity.clone().multiplyScalar(100 * delta));
+                
+                // Simple sine wave movement for "wavy" look
+                p.hitTime += delta * 10;
+                p.position.y += Math.sin(p.hitTime * 5) * 0.5 * delta * 50;
+
+                // Check for collision with Cathode
+                if (p.position.x < CATHODE_X) {
+                    // Collision detected
+                    const { frequency, workFunction } = getControlValues();
+                    const kMax = (h * frequency) - workFunction;
+                    
+                    if (kMax > 0) {
+                        // Eject electron
+                        createElectron(p.position.clone(), kMax);
+                    } else {
+                         // Photon reflects or is absorbed without electron ejection
+                         // Visual feedback for no ejection: a red flash
+                         flash(p.position, 0xff0000);
+                    }
+                    
+                    // Remove photon
+                    scene.remove(p);
+                    photons.splice(i, 1);
+                }
+            }
+        }
+
+        // --- Electron Logic ---
+        function createElectron(startPosition, kineticEnergy) {
+            // Sphere to represent the electron
+            const geo = new THREE.SphereGeometry(1, 16, 16);
+            const mat = new THREE.MeshLambertMaterial({ color: 0x3b82f6, emissive: 0x3b82f6 }); // Blue for electron
+            const electron = new THREE.Mesh(geo, mat);
+            
+            // Start position is slightly off the cathode surface
+            electron.position.copy(startPosition);
+            electron.position.x += 1; // Move slightly past the cathode plane
+            
+            // Initial velocity based on kinetic energy (K = 0.5 * m * v^2)
+            // We use K_max directly as a speed scalar since mass is normalized/conceptual
+            const speed = Math.sqrt(kineticEnergy) * 5; // Scale for visualization
+            
+            // Eject electron towards the anode (positive X direction)
+            electron.velocity = new THREE.Vector3(
+                speed, // Main speed component
+                (Math.random() - 0.5) * speed * 0.05, // Small random Y component
+                (Math.random() - 0.5) * speed * 0.05  // Small random Z component
+            );
+
+            // Store properties
+            electron.kineticEnergy = kineticEnergy;
+            
+            scene.add(electron);
+            electrons.push(electron);
+
+            // Visual feedback for successful ejection: a bright flash
+            flash(startPosition, 0x00ff00);
+        }
+
+        function updateElectrons(delta) {
+            for (let i = electrons.length - 1; i >= 0; i--) {
+                const e = electrons[i];
+                
+                // Move electron
+                e.position.add(e.velocity.clone().multiplyScalar(delta));
+                
+                // Check for collision with Anode
+                if (e.position.x > ANODE_X) {
+                    // Collision detected (Current flow)
+                    // Visual feedback for successful collection: a yellow flash
+                    flash(e.position, 0xffff00);
+                    
+                    // Remove electron
+                    scene.remove(e);
+                    electrons.splice(i, 1);
+                }
+            }
+        }
+        
+        // --- Helper Functions ---
+        
+        function getControlValues() {
+            const frequency = parseFloat(document.getElementById('frequency').value);
+            const intensity = parseFloat(document.getElementById('intensity').value);
+            const workFunction = parseFloat(document.getElementById('work-function').value);
+            
+            document.getElementById('frequency-value').textContent = frequency.toFixed(1);
+            document.getElementById('intensity-value').textContent = intensity.toFixed(1);
+            document.getElementById('work-function-value').textContent = workFunction.toFixed(1);
+            
+            return { frequency, intensity, workFunction };
+        }
+
+        function getFrequencyColor(frequency) {
+            // Map frequency (1-10) to a color spectrum (Red -> Violet)
+            // 1.0 = Red (low E), 10.0 = Violet (high E)
+            const ratio = (frequency - 1) / 9; 
+            const colors = [0xff0000, 0xffa500, 0xffff00, 0x00ff00, 0x0000ff, 0x8a2be2]; // R, O, Y, G, B, V
+            
+            if (ratio <= 0) return colors[0];
+            if (ratio >= 1) return colors[5];
+            
+            const index = Math.floor(ratio * 5);
+            return colors[index];
+        }
+
+        let lastPhotonTime = 0;
+
+        function emitPhotons(deltaTime, intensity) {
+            const emissionRate = intensity * 10; // More intensity = more photons per second
+            const timeSinceLastPhoton = performance.now() - lastPhotonTime;
+            
+            // Use a probability based on the desired rate
+            if (timeSinceLastPhoton > (1000 / emissionRate)) {
+                const { frequency } = getControlValues();
+                createPhoton(frequency);
+                lastPhotonTime = performance.now();
+            }
+        }
+        
+        function updateSimulation() {
+            // Check if lightSource has been initialized before accessing its properties
+            if (!lightSource) return;
+
+            const { frequency, intensity } = getControlValues();
+            
+            // Update light source visualization
+            const bulbMat = lightSource.material;
+            bulbMat.color.set(getFrequencyColor(frequency));
+            bulbMat.opacity = 0.5 + intensity * 0.4;
+            
+            // Clear existing photons if frequency changes drastically (optional, for visual clarity)
+            // But usually just letting the next frame's emission take over is fine.
+        }
+
+        // --- Visual Feedback (Flash) ---
+        function flash(position, color) {
+            const flashGeo = new THREE.SphereGeometry(2, 8, 8);
+            const flashMat = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 1.0 });
+            const flashMesh = new THREE.Mesh(flashGeo, flashMat);
+            flashMesh.position.copy(position);
+            scene.add(flashMesh);
+
+            // Animate flash disappearance
+            new TWEEN.Tween({ opacity: 1.0, scale: 1.0 })
+                .to({ opacity: 0.0, scale: 5.0 }, 300)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .onUpdate(({ opacity, scale }) => {
+                    flashMesh.material.opacity = opacity;
+                    flashMesh.scale.set(scale, scale, scale);
+                })
+                .onComplete(() => {
+                    scene.remove(flashMesh);
+                })
+                .start();
+        }
+
+        // --- Animation Loop ---
+        let clock = new THREE.Clock();
+
+        // Simple TWEEN library imitation for smooth animation outside of Three.js core
+        const TWEEN = {
+            _tweens: [],
+            add: (tween) => TWEEN._tweens.push(tween),
+            remove: (tween) => TWEEN._tweens = TWEEN._tweens.filter(t => t !== tween),
+            update: (time) => {
+                TWEEN._tweens.forEach(tween => tween.update(time));
+            },
+            Easing: {
+                Quadratic: { Out: (k) => k * (2 - k) }
+            },
+            Tween: class {
+                constructor(object) {
+                    this._object = object;
+                    this._duration = 1000;
+                    this._easing = TWEEN.Easing.Quadratic.Out;
+                    this._onUpdateCallback = () => {};
+                    this._onCompleteCallback = () => {};
+                    this._startTime = 0;
+                    this._isStarted = false;
+                }
+                to(properties, duration) {
+                    this._properties = properties;
+                    this._duration = duration;
+                    return this;
+                }
+                easing(easing) {
+                    this._easing = easing;
+                    return this;
+                }
+                onUpdate(callback) {
+                    this._onUpdateCallback = callback;
+                    return this;
+                }
+                onComplete(callback) {
+                    this._onCompleteCallback = callback;
+                    return this;
+                }
+                start(time) {
+                    this._startTime = time !== undefined ? time : performance.now();
+                    this._isStarted = true;
+                    this._startProperties = { ...this._object };
+                    TWEEN.add(this);
+                    return this;
+                }
+                update(time) {
+                    if (!this._isStarted) return;
+
+                    let elapsed = time - this._startTime;
+                    let t = elapsed / this._duration;
+                    
+                    if (t > 1) {
+                        t = 1;
+                        TWEEN.remove(this);
+                        // Ensure final state is set
+                        Object.assign(this._object, this._properties);
+                        this._onUpdateCallback(this._object);
+                        this._onCompleteCallback();
+                        return;
+                    }
+
+                    const progress = this._easing(t);
+
+                    for (const prop in this._properties) {
+                        const start = this._startProperties[prop];
+                        const end = this._properties[prop];
+                        this._object[prop] = start + (end - start) * progress;
+                    }
+
+                    this._onUpdateCallback(this._object);
+                }
+            }
+        };
+
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+
+            if (!simulationReady) return;
+
+            const delta = clock.getDelta();
+
+            // Run TWEEN update for visual effects (flashes)
+            TWEEN.update(time);
+
+            // Get current control values
+            const { intensity } = getControlValues();
+
+            // Emit new photons based on intensity
+            emitPhotons(delta, intensity);
+
+            // Update positions of existing particles
+            updatePhotons(delta);
+            updateElectrons(delta);
+            
+            // Render the scene
+            renderer.render(scene, camera);
+        }
+
+        // Initialize and start simulation
+        window.onload = function () {
+            init();
+            // Call updateSimulation() AFTER init() to ensure lightSource is defined
+            updateSimulation(); 
+            animate();
+            
+            // --- KaTeX Rendering ---
+            // Ensure KaTeX runs after the DOM is fully loaded and all scripts are present
+            if (typeof renderMathInElement === 'function') {
+                renderMathInElement(document.body, {
+                    // Default configuration: look for formulas enclosed in $...$
+                    delimiters: [
+                        {left: "$$", right: "$$", display: true},
+                        {left: "$", right: "$", display: false},
+                        {left: "\\[", right: "\\]", display: true},
+                        {left: "\\(", right: "\\)", display: false}
+                    ]
+                });
+            }
+        }
+
+    </script>
+
+</body>
+</html>
