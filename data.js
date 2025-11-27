@@ -1,8 +1,29 @@
 // data.js
 
 const simulations = [
+    // --- FREE ACCESS DEMOS ---
     {
         id: 1,
+        title: "Gravity & Orbits",
+        topic: "Astrophysics",
+        grade: "FREE • Grade 9-10", 
+        desc: "Visualize how mass affects gravitational pull and planetary orbits in a 3D space.",
+        image: "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?q=80&w=600&auto=format&fit=crop", 
+        file: "sims/gravity.html"
+    },
+    {
+        id: 2,
+        title: "Projectile Motion",
+        topic: "Kinematics",
+        grade: "FREE • Grade 11",
+        desc: "Launch objects at different angles and velocities to understand parabolic trajectories.",
+        image: "https://images.unsplash.com/photo-1516339901601-2e1b62dc0c45?q=80&w=600&auto=format&fit=crop", 
+        file: "sims/projectile.html" 
+    },
+
+    // --- FULL SYLLABUS CONTENT ---
+    {
+        id: 3,
         title: "Rotational Dynamics",
         topic: "Mechanics",
         grade: "Grade 11",
@@ -11,7 +32,7 @@ const simulations = [
         file: "sims/rotational.html"
     },
     {
-        id: 2,
+        id: 4,
         title: "Waves & Sound",
         topic: "Oscillations",
         grade: "Grade 11",
@@ -20,7 +41,7 @@ const simulations = [
         file: "sims/waves.html"
     },
     {
-        id: 3,
+        id: 5,
         title: "Electronics & Logic",
         topic: "Electronics",
         grade: "Grade 12",
@@ -29,7 +50,7 @@ const simulations = [
         file: "sims/electronics.html"
     },
     {
-        id: 4,
+        id: 6,
         title: "Modern Physics",
         topic: "Quantum Physics",
         grade: "Grade 12",
@@ -38,7 +59,7 @@ const simulations = [
         file: "sims/modern.html"
     },
     {
-        id: 5,
+        id: 7,
         title: "EMI & AC Circuits",
         topic: "Electromagnetism",
         grade: "Grade 12",
@@ -47,7 +68,7 @@ const simulations = [
         file: "sims/ac-circuits.html"
     },
     {
-        id: 6,
+        id: 8,
         title: "Electrostatics",
         topic: "Electromagnetism",
         grade: "Grade 12",
@@ -56,7 +77,7 @@ const simulations = [
         file: "sims/electrostatics.html"
     },
     {
-        id: 7,
+        id: 9,
         title: "Current Electricity",
         topic: "Electromagnetism",
         grade: "Grade 12",
@@ -65,7 +86,7 @@ const simulations = [
         file: "sims/current.html"
     },
     {
-        id: 8,
+        id: 10,
         title: "Properties of Matter",
         topic: "Mechanics",
         grade: "Grade 11",
@@ -74,7 +95,7 @@ const simulations = [
         file: "sims/properties.html"
     },
     {
-        id: 9,
+        id: 11,
         title: "Thermodynamics",
         topic: "Heat",
         grade: "Grade 11",
@@ -83,7 +104,7 @@ const simulations = [
         file: "sims/thermodynamics.html"
     },
     {
-        id: 10,
+        id: 12,
         title: "Geometrical Optics",
         topic: "Optics",
         grade: "Grade 12",
