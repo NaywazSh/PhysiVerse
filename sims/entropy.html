@@ -21,6 +21,7 @@
             top: 0;
             left: 0;
             width: 100%;
+            height: 100%; /* Ensure overlay spans full height */
             pointer-events: none; /* Allows mouse events to pass through to the canvas */
         }
         .temp-label {
@@ -32,6 +33,7 @@
             user-select: none;
         }
         .flow-text {
+            position: absolute; /* Added position absolute for bottom anchoring */
             color: #ff8c00;
             font-size: 1.5rem;
             font-weight: 700;
@@ -39,11 +41,12 @@
         }
         .caption-box {
             position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            max-width: 600px;
-            padding: 1rem;
+            top: 20px;
+            left: 0; /* Full width adjustment */
+            right: 0; /* Full width adjustment */
+            width: 100%; /* Ensure full width */
+            /* Removed max-width and transform: translateX(-50%) */
+            padding: 1rem 3rem; /* Added horizontal padding for visual margin */
             background: rgba(18, 24, 32, 0.85);
             border: 1px solid #333;
             border-radius: 0.75rem;
@@ -60,11 +63,12 @@
     <div id="scene-container">
         <!-- Overlay for 2D text labels (easier than 3D text) -->
         <div id="info-overlay">
-            <!-- Adjusted vertical position to top-[92%] (moved very close to the bottom) -->
-            <div id="t1-label" class="temp-label top-[92%] -translate-y-1/2 left-1/4 -translate-x-1/2">T₁ (Hot)</div>
-            <div id="t2-label" class="temp-label top-[92%] -translate-y-1/2 right-1/4 translate-x-1/2">T₂ (Cold)</div>
-            <!-- Adjusted vertical position to top-[75%] (moved further down) -->
-            <div class="absolute top-[75%] left-1/2 -translate-x-1/2 flow-text">
+            <!-- T1 (Hot): Anchored 90px from the bottom -->
+            <div id="t1-label" class="temp-label bottom-[90px] left-1/4 -translate-x-1/2">T₁ (Hot)</div>
+            <!-- T2 (Cold): Anchored 90px from the bottom -->
+            <div id="t2-label" class="temp-label bottom-[90px] right-1/4 translate-x-1/2">T₂ (Cold)</div>
+            <!-- Delta Q: Anchored 140px from the bottom, higher than the T labels -->
+            <div class="flow-text bottom-[140px] left-1/2 -translate-x-1/2">
                 ΔQ (Heat Flow) →
             </div>
             <div class="caption-box">
