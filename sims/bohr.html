@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Bohr Atom Model Simulator</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Hide scrollbars for full-screen canvas */
+            background-color: #111827; /* Dark background */
+        }
+        #scene-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+        }
+        #ui-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Allows clicks to pass through to the canvas by default */
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 1rem;
+        }
+        .control-button {
+            pointer-events: auto; /* Re-enable pointer events for buttons */
+            transition: all 0.15s ease-in-out;
+            cursor: pointer;
+        }
+        .control-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(255, 255, 255, 0.3);
+        }
+        .control-button:active {
+            transform: translateY(0);
+        }
+        .nucleus-charge-text {
+            text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+        }
+    </style>
+</head>
+<body>
+    <div id="scene-container"></div>
+    <div id="ui-container">
+        <!-- Top Section: Title (Centered) and Stats (Left) -->
+        <div class="w-full">
+            <!-- Title, Centered -->
+            <div class="flex justify-center w-full pt-4">
+                <h1 class="text-3xl font-extrabold text-white">Bohr Model Simulator</h1>
+            </div>
+            <!-- Stats Box, Top Left Positioned - REDUCED SIZE HERE -->
+            <div id="stats" class="absolute top-16 left-4 bg-gray-800/80 p-3 rounded-xl shadow-2xl space-y-1 w-full max-w-64 md:max-w-xs pointer-events-auto">
+                <p class="text-base font-semibold text-white flex justify-between">
+                    Protons (Z): <span id="proton-count" class="text-purple-400">0</span>
+                </p>
+                <p class="text-base font-semibold text-white flex justify-between">
+                    Electrons: <span id="electron-count" class="text-blue-400">0</span>
+                </p>
+                <p class="text-base font-bold flex justify-between">
+                    Net Charge: <span id="net-charge" class="nucleus-charge-text text-yellow-300">0</span>
+                </p>
+                <div class="text-xs pt-1 border-t border-gray-700 text-gray-400">
+                    <p>K (n=1) Max: 2 / L (n=2) Max: 8 / M (n=3) Max: 18 / N (n=4) Max: 32</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Section: Controls -->
+        <div class="flex justify-center space-x-4">
+            <button id="add-proton" class="control-button bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-full shadow-lg flex items-center space-x-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
+                </svg>
+                <span>Add Proton</span>
+            </button>
+            <button id="add-electron" class="control-button bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-full shadow-lg flex items-center space-x-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
+                </svg>
+                <span>Add Electron</span>
+            </button>
+            <button id="reset-atom" class="control-button bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-full shadow-lg flex items-center space-x-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H8a1 1 0 010 2H4a1 1 0 01-1-1V4a1 1 0 011-1z" />
+                </svg>
+                <span>Reset Atom</span>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- CORE VARIABLES & SETUP ---
+        let scene, camera, renderer, container;
+        let protonCount = 0;
+        let electrons = [];
+        let nucleus;
+
+        // Orbital shell properties (Radius, Capacity)
+        const shells = [
+            { radius: 1.5, capacity: 2, currentCount: 0, color: 0x8800ff, rotationSpeed: 0.005, shellName: 'K' }, // n=1
+            { radius: 3.0, capacity: 8, currentCount: 0, color: 0x00ff88, rotationSpeed: 0.003, shellName: 'L' }, // n=2
+            { radius: 4.5, capacity: 18, currentCount: 0, color: 0xff8800, rotationSpeed: 0.002, shellName: 'M' }, // n=3
+            { radius: 6.0, capacity: 32, currentCount: 0, color: 0x0088ff, rotationSpeed: 0.001, shellName: 'N' }, // n=4
+        ];
+        
+        const electronGeometry = new THREE.SphereGeometry(0.15, 16, 16);
+        const electronMaterial = new THREE.MeshPhongMaterial({ color: 0x3b82f6, emissive: 0x3b82f6, emissiveIntensity: 0.5 });
+
+        // DOM elements for updating stats
+        const $protonCount = document.getElementById('proton-count');
+        const $electronCount = document.getElementById('electron-count');
+        const $netCharge = document.getElementById('net-charge');
+        const $addProtonBtn = document.getElementById('add-proton');
+        const $addElectronBtn = document.getElementById('add-electron');
+        const $resetAtomBtn = document.getElementById('reset-atom');
+
+        // Initial setup function
+        function init() {
+            container = document.getElementById('scene-container');
+            const aspectRatio = window.innerWidth / window.innerHeight;
+
+            // 1. Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111827); // Match body background
+
+            // 2. Camera (Perspective)
+            camera = new THREE.PerspectiveCamera(50, aspectRatio, 0.1, 100);
+            camera.position.z = 12;
+
+            // 3. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // 4. Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 5); // soft white light
+            scene.add(ambientLight);
+            const pointLight = new THREE.PointLight(0xffffff, 1.5);
+            pointLight.position.set(5, 5, 5);
+            scene.add(pointLight);
+
+            // 5. Nucleus (Placeholder - starts with no charge)
+            const nucleusGeometry = new THREE.SphereGeometry(1.0, 32, 32);
+            const nucleusMaterial = new THREE.MeshPhongMaterial({ color: 0x6b21a8, emissive: 0x6b21a8, emissiveIntensity: 0.4 });
+            nucleus = new THREE.Mesh(nucleusGeometry, nucleusMaterial);
+            scene.add(nucleus);
+
+            // 6. Draw Orbits (Shells)
+            drawOrbits();
+
+            // 7. Event Listeners
+            $addProtonBtn.addEventListener('click', addProton);
+            $addElectronBtn.addEventListener('click', addElectron);
+            $resetAtomBtn.addEventListener('click', resetAtom);
+            window.addEventListener('resize', onWindowResize);
+
+            // Start the animation loop
+            animate();
+            updateStats();
+        }
+
+        // --- ATOM MODIFICATION FUNCTIONS ---
+
+        function drawOrbits() {
+            shells.forEach((shell, index) => {
+                // TorusGeometry (ring shape)
+                const geometry = new THREE.TorusGeometry(shell.radius, 0.02, 16, 100);
+                const material = new THREE.MeshBasicMaterial({ color: shell.color, transparent: true, opacity: 0.5 });
+                const orbit = new THREE.Mesh(geometry, material);
+                
+                // --- ADJUSTED TILT for better 3D visual separation ---
+                if (index === 0) {
+                    orbit.rotation.x = Math.PI / 3;
+                    orbit.rotation.z = Math.PI / 8; // Small Z tilt
+                } else if (index === 1) {
+                    orbit.rotation.z = Math.PI / 4;
+                } else if (index === 2) {
+                    orbit.rotation.x = -Math.PI / 5;
+                    orbit.rotation.z = -Math.PI / 10; // Combined tilt
+                } else {
+                    orbit.rotation.z = Math.PI / 6;
+                    orbit.rotation.x = Math.PI / 12; // Combined tilt
+                }
+                
+                shell.mesh = orbit;
+                scene.add(orbit);
+            });
+        }
+
+        function addProton() {
+            protonCount++;
+            // Visually, the nucleus material changes slightly to indicate the charge increase
+            const colorBlend = 0x6b21a8 + (protonCount * 0x010000); // Shift color slightly towards red
+            nucleus.material.color.setHex(colorBlend);
+            nucleus.material.emissive.setHex(colorBlend);
+
+            // Conceptual change: Protons are inside the nucleus, we update the count.
+            updateStats();
+        }
+
+        function addElectron() {
+            // Find the next available shell to place the electron (K -> L -> M -> N)
+            let shellIndex = -1;
+            for (let i = 0; i < shells.length; i++) {
+                if (shells[i].currentCount < shells[i].capacity) {
+                    shellIndex = i;
+                    break;
+                }
+            }
+
+            if (shellIndex === -1) {
+                // Atom is full up to N shell (simplified)
+                console.log("Maximum electrons reached (up to N shell)");
+                // Optionally show a message to the user
+                return;
+            }
+
+            const shell = shells[shellIndex];
+            
+            // Create the electron mesh
+            const electronMesh = new THREE.Mesh(electronGeometry, electronMaterial.clone());
+            
+            // --- REFINED ANGULAR POSITIONING FOR PERFECT DISTRIBUTION ---
+            // Calculate the exact angle based on current count to ensure even spacing (2*PI / capacity)
+            const angularSeparation = (Math.PI * 2) / shell.capacity;
+            const initialAngle = shell.currentCount * angularSeparation;
+
+            // Position the electron on the local XZ plane of the orbit mesh
+            electronMesh.position.set(
+                shell.radius * Math.cos(initialAngle), 
+                0, // Y must be 0 to place it on the center of the torus ring
+                shell.radius * Math.sin(initialAngle)
+            );
+
+            // Create a group for the electron and add it to the correct orbit's rotation group
+            const electron = {
+                mesh: electronMesh,
+                radius: shell.radius,
+                speed: shell.rotationSpeed,
+                angle: initialAngle,
+                shell: shellIndex,
+                orbitGroup: shell.mesh // Attach electron to the orbit mesh for rotation
+            };
+            
+            shells[shellIndex].currentCount++;
+            electron.orbitGroup.add(electronMesh);
+            electrons.push(electron);
+            
+            updateStats();
+        }
+
+        function resetAtom() {
+            // Remove all electrons from their orbit groups and the scene
+            electrons.forEach(e => {
+                e.orbitGroup.remove(e.mesh);
+                e.mesh.geometry.dispose();
+                e.mesh.material.dispose();
+            });
+
+            // Reset state variables
+            protonCount = 0;
+            electrons = [];
+            shells.forEach(shell => shell.currentCount = 0);
+            
+            // Reset nucleus color
+            nucleus.material.color.setHex(0x6b21a8);
+            nucleus.material.emissive.setHex(0x6b21a8);
+
+            updateStats();
+        }
+
+        function updateStats() {
+            const electronCount = electrons.length;
+            const netCharge = protonCount - electronCount;
+
+            $protonCount.textContent = protonCount;
+            $electronCount.textContent = electronCount;
+            $netCharge.textContent = netCharge;
+
+            // Highlight net charge text based on polarity
+            if (netCharge > 0) {
+                $netCharge.className = 'nucleus-charge-text text-red-400 font-bold';
+            } else if (netCharge < 0) {
+                $netCharge.className = 'nucleus-charge-text text-blue-400 font-bold';
+            } else {
+                $netCharge.className = 'nucleus-charge-text text-yellow-300 font-bold';
+            }
+        }
+
+        // --- ANIMATION & RENDER LOOP ---
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+
+            // Rotate the nucleus slowly for visual interest
+            nucleus.rotation.y += 0.0005;
+
+            // Animate Electrons (by updating the rotation of their parent orbit meshes)
+            shells.forEach(shell => {
+                if (shell.mesh) {
+                    // This rotates the orbit mesh (and all children electrons) around the global Y-axis
+                    shell.mesh.rotation.y += shell.rotationSpeed;
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        // --- UTILITY ---
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Initialize the 3D scene when the window loads
+        window.onload = init;
+
+    </script>
+</body>
+</html>
