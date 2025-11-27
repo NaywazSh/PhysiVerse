@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Phasor Diagram Simulator</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- Load KaTeX for LaTeX rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" xintegrity="sha384-Gvr8Y9WqFMI1iGk2v/6S6S8z/B4Ea4F79/Bw0k52I8B5y5v2e3+0E7B7+2+8/N5S" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" xintegrity="sha384-F2v4b7bT/7g0V6V+6V4Fv2w2v/B4Ea4F79/Bw0k52I8B5y5v2e3+0E7B7+2+8/N5S" crossorigin="anonymous"></script>
+
+    <style>
+        /* Custom styles for the 3D container */
+        #scene-container {
+            width: 100%;
+            height: 60vh;
+            background-color: #111827; /* Dark background */
+            border-radius: 0.75rem;
+            overflow: hidden;
+            touch-action: none; /* Disable default touch actions for better custom controls */
+        }
+        /* Custom font for better readability */
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 p-4 md:p-8">
+
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6 text-center">Interactive Phasor Diagram (3D)</h1>
+
+        <!-- Main Simulation Container -->
+        <div id="scene-container" class="shadow-2xl mb-8"></div>
+
+        <!-- Controls and Formula Display -->
+        <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Controls and Results</h2>
+            
+            <!-- Input Sliders -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                
+                <!-- Angle (omega t) Control -->
+                <div class="flex flex-col">
+                    <label for="angle-slider" class="text-lg font-medium text-gray-600 mb-2 flex justify-between">
+                        <!-- ID for KaTeX rendering -->
+                        <span id="angle-label">Angle $\omega t$:</span>
+                        <span id="angle-value" class="font-mono text-blue-600">0.0&deg;</span>
+                    </label>
+                    <input type="range" id="angle-slider" min="0" max="360" value="0" step="1" 
+                           class="w-full h-2 bg-blue-100 rounded-lg appearance-none cursor-pointer range-lg transition duration-150 ease-in-out hover:bg-blue-200">
+                </div>
+
+                <!-- Amplitude (Am) Control -->
+                <div class="flex flex-col">
+                    <label for="amplitude-slider" class="text-lg font-medium text-gray-600 mb-2 flex justify-between">
+                        <!-- ID for KaTeX rendering -->
+                        <span id="amplitude-label">Amplitude $A_m$:</span>
+                        <span id="amplitude-value" class="font-mono text-green-600">3.0</span>
+                    </label>
+                    <input type="range" id="amplitude-slider" min="1" max="5" value="3" step="0.1" 
+                           class="w-full h-2 bg-green-100 rounded-lg appearance-none cursor-pointer range-lg transition duration-150 ease-in-out hover:bg-green-200">
+                </div>
+            </div>
+
+            <!-- Formula Display -->
+            <div class="p-4 bg-blue-50 border-l-4 border-blue-400 rounded-lg">
+                <p class="text-gray-700 text-lg mb-2">
+                    <span class="font-bold">Formula:</span> <span id="static-formula-display">$A(t) = A_m \sin(\omega t)$</span>
+                </p>
+                <p class="text-2xl font-bold text-blue-800">
+                    <span id="dynamic-formula-display"></span>
+                </p>
+                <p class="mt-2 text-xl font-semibold text-gray-800">
+                    <span class="font-bold">Result:</span> $A(t) = $ <span id="at-result-value" class="text-red-600 font-bold">0.00</span>
+                </p>
+            </div>
+        </div>
+        
+        <p class="mt-4 text-sm text-gray-500 text-center">
+            *The phasor rotates in the X-Y plane. The waveform extends along the Z-axis (time/angle). Use your mouse to rotate and zoom the camera.*
+        </p>
+
+    </div>
+
+    <script type="module">
+        // Global variables for Three.js components
+        let scene, camera, renderer, phasorMesh, sineWaveMesh, projectionLine, interactionPoint;
+        let container = document.getElementById('scene-container');
+        let A_m = 3.0; // Amplitude
+        let angleRad = 0; // Current angle in radians
+        
+        // UI Elements
+        const angleSlider = document.getElementById('angle-slider');
+        const amplitudeSlider = document.getElementById('amplitude-slider');
+        const angleValueDisplay = document.getElementById('angle-value');
+        const amplitudeValueDisplay = document.getElementById('amplitude-value');
+        
+        // New elements for KaTeX rendering
+        const dynamicFormulaDisplay = document.getElementById('dynamic-formula-display');
+        const atResultValue = document.getElementById('at-result-value');
+
+
+        // --- KaTeX Initialization ---
+        function renderStaticFormulas() {
+            // Render the static formula
+            const staticFormulaElement = document.getElementById('static-formula-display');
+            if (staticFormulaElement && typeof katex !== 'undefined') {
+                const formulaText = staticFormulaElement.textContent.replace('$', '').replace('$', '');
+                katex.render(formulaText, staticFormulaElement, { displayMode: false });
+            }
+            // Render the control labels (Amplitude and Angle)
+            const angleLabelElement = document.getElementById('angle-label');
+            if (angleLabelElement && typeof katex !== 'undefined') {
+                const angleText = angleLabelElement.textContent; // Should contain '$' delimiters
+                katex.render(angleText, angleLabelElement, { displayMode: false, throwOnError: false });
+            }
+            const amplitudeLabelElement = document.getElementById('amplitude-label');
+            if (amplitudeLabelElement && typeof katex !== 'undefined') {
+                const amplitudeText = amplitudeLabelElement.textContent; // Should contain '$' delimiters
+                katex.render(amplitudeText, amplitudeLabelElement, { displayMode: false, throwOnError: false });
+            }
+        }
+        
+        // Wait for KaTeX library to load before rendering
+        if (typeof katex !== 'undefined') {
+            window.addEventListener('load', renderStaticFormulas);
+        } else {
+            // Fallback check in case the script loads after load event
+            const checkKatex = setInterval(() => {
+                if (typeof katex !== 'undefined') {
+                    clearInterval(checkKatex);
+                    renderStaticFormulas();
+                }
+            }, 100);
+        }
+        // --- End KaTeX Initialization ---
+
+
+        // Helper function for creating dashed lines
+        function createDashedLine(start, end, color = 0xaaaaaa) {
+            const points = [start, end];
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineDashedMaterial({
+                color: color,
+                linewidth: 1,
+                scale: 1,
+                dashSize: 0.1,
+                gapSize: 0.1,
+            });
+            const line = new THREE.Line(geometry, material);
+            line.computeLineDistances();
+            return line;
+        }
+
+        // Helper function to create a 2D text sprite always facing the camera
+        function createTextNode(message, size = 1.5, color = 'white', radius, angleRad) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            
+            // Set font and measure text
+            const fontSize = 100;
+            context.font = 'Bold ' + fontSize + 'px Inter, sans-serif';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            
+            const metrics = context.measureText(message);
+            
+            // Calculate canvas size based on text metrics
+            canvas.width = metrics.width + 20;
+            canvas.height = fontSize + 20;
+            
+            // Redraw text centered on the resized canvas
+            context.font = 'Bold ' + fontSize + 'px Inter, sans-serif';
+            context.fillStyle = color;
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(message, canvas.width / 2, canvas.height / 2);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            
+            // Create a SpriteMaterial from the texture
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            
+            // Scale the sprite relative to its canvas size and desired display size
+            const aspect = canvas.width / canvas.height;
+            sprite.scale.set(size * aspect, size, 1);
+            
+            // Position the sprite in the 3D scene
+            const x = radius * Math.cos(angleRad);
+            const y = radius * Math.sin(angleRad);
+            sprite.position.set(x, y, 0);
+
+            return sprite;
+        }
+
+        // --- Core Functions ---
+
+        function init() {
+            // 1. Scene setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111827);
+
+            // 2. Camera setup
+            const aspectRatio = container.clientWidth / container.clientHeight;
+            // Use a PerspectiveCamera for the 3D effect
+            camera = new THREE.PerspectiveCamera(75, aspectRatio, 0.1, 1000);
+            camera.position.set(5, 5, 8);
+            camera.lookAt(0, 0, 0);
+
+            // 3. Renderer setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+
+            // 4. Add Axes Helper (X: red, Y: green, Z: blue)
+            const axesHelper = new THREE.AxesHelper(5);
+            axesHelper.material.opacity = 0.5;
+            axesHelper.material.transparent = true;
+            scene.add(axesHelper);
+
+            // 5. Create the Phasor Diagram Plane (X-Y plane) with labels
+            createPhasorCircle();
+
+            // 6. Create the Phasor Vector
+            phasorMesh = createPhasor(A_m);
+            scene.add(phasorMesh);
+
+            // 7. Create the Sinusoidal Waveform (along Z-axis)
+            sineWaveMesh = createSineWave(A_m);
+            scene.add(sineWaveMesh);
+
+            // 8. Create the interaction point (the dot on the wave)
+            const pointGeometry = new THREE.SphereGeometry(0.1, 16, 16);
+            const pointMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            interactionPoint = new THREE.Mesh(pointGeometry, pointMaterial);
+            scene.add(interactionPoint);
+            
+            // 9. Projection line (will be updated)
+            projectionLine = createDashedLine(new THREE.Vector3(), new THREE.Vector3(), 0xffffff); // White
+            scene.add(projectionLine);
+
+            // 10. Add light
+            const ambientLight = new THREE.AmbientLight(0x404040, 5); // soft white light
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(10, 10, 10);
+            scene.add(directionalLight);
+
+            // 11. Event Listeners
+            window.addEventListener('resize', onWindowResize, false);
+            angleSlider.addEventListener('input', updatePhasorFromSlider);
+            amplitudeSlider.addEventListener('input', updateAmplitude);
+            
+            // 12. Mouse controls for camera rotation (basic orbit control)
+            setupMouseControls();
+
+            // Initial update
+            updatePhasor(angleRad, A_m);
+        }
+
+        // --- Geometry Creation Functions ---
+        
+        // Creates the main circle, angle markings, and now, labels
+        function createPhasorCircle() {
+            // Guard clause for scene initialization
+            if (!scene) return;
+
+            const currentAm = A_m;
+
+            // Main Circle Outline (X-Y Plane)
+            const circleGeometry = new THREE.RingGeometry(currentAm, currentAm + 0.05, 64);
+            const circleMaterial = new THREE.MeshBasicMaterial({ color: 0xcccccc, side: THREE.DoubleSide });
+            const circleMesh = new THREE.Mesh(circleGeometry, circleMaterial);
+            circleMesh.name = "PhasorCircle"; // Name for easier cleanup
+            scene.add(circleMesh);
+
+            // Angle Markers and Labels
+            const textRadius = currentAm + 0.8; // Position labels slightly further out
+            
+            for (let i = 0; i < 12; i++) { // Every 30 degrees (0, 30, 60, ..., 330)
+                const angleDeg = i * 30;
+                const angleRad = angleDeg * Math.PI / 180;
+                const innerRadius = currentAm - 0.2;
+                const outerRadius = currentAm + 0.1;
+                
+                // Line marker
+                const start = new THREE.Vector3(innerRadius * Math.cos(angleRad), innerRadius * Math.sin(angleRad), 0);
+                const end = new THREE.Vector3(outerRadius * Math.cos(angleRad), outerRadius * Math.sin(angleRad), 0);
+                const line = new THREE.BufferGeometry().setFromPoints([start, end]);
+                const lineMesh = new THREE.Line(line, new THREE.LineBasicMaterial({ color: 0x888888 }));
+                lineMesh.name = `Marker-${angleDeg}`;
+                scene.add(lineMesh);
+                
+                // Text Label
+                const label = createTextNode(angleDeg + '\u00B0', 0.8, 'white', textRadius, angleRad);
+                label.name = `Label-${angleDeg}`;
+                scene.add(label);
+            }
+        }
+
+        // Creates the phasor vector (a cylinder/line with an arrow head)
+        function createPhasor(amplitude) {
+            // Main vector body (Cylinder)
+            // Note: Cylinder is created along the Y-axis by default
+            const cylinderGeometry = new THREE.CylinderGeometry(0.05, 0.05, amplitude, 32);
+            const cylinderMaterial = new THREE.MeshPhongMaterial({ color: 0xa855f7 }); // Purple
+            const cylinder = new THREE.Mesh(cylinderGeometry, cylinderMaterial);
+            
+            // Arrow head (Cone)
+            const coneGeometry = new THREE.ConeGeometry(0.15, 0.3, 32);
+            const coneMaterial = new THREE.MeshPhongMaterial({ color: 0xc084fc }); // Lighter Purple
+            const cone = new THREE.Mesh(coneGeometry, coneMaterial);
+            
+            // Group the vector and arrow head
+            const group = new THREE.Group();
+            group.add(cylinder);
+            group.add(cone);
+            
+            // Position the cylinder's center correctly (it's centered at 0,0,0 initially)
+            cylinder.position.y = amplitude / 2;
+            cone.position.y = amplitude; // Place cone at the end
+            
+            // Orient the group to point along the +X axis initially (its rotation point)
+            
+            return group;
+        }
+        
+        // Creates the sinusoidal waveform geometry
+        function createSineWave(amplitude, length = 10, resolution = 200) {
+            const points = [];
+            const t_max = 2 * Math.PI * (length / (2 * Math.PI)); // Length is in Z-axis units
+
+            for (let i = 0; i <= resolution; i++) {
+                const z = (i / resolution) * length; // Z-axis represents angle/time
+                const angle = (z / length) * t_max;
+                const y = amplitude * Math.sin(angle); // Amplitude in Y-direction
+                points.push(new THREE.Vector3(0, y, z));
+            }
+
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({ color: 0x3b82f6, linewidth: 2 }); // Blue
+            const line = new THREE.Line(geometry, material);
+            
+            // Line needs to be shifted to start at Z=0
+            line.position.z = -length / 2;
+            return line;
+        }
+
+        // --- Update Functions ---
+
+        function updatePhasorFromSlider() {
+            const angleDeg = parseFloat(angleSlider.value);
+            const newAngleRad = angleDeg * Math.PI / 180;
+            updatePhasor(newAngleRad, A_m);
+        }
+
+        function updateAmplitude() {
+            // Guard clause to prevent errors before scene is initialized
+            if (!scene || !phasorMesh || !sineWaveMesh) return;
+
+            A_m = parseFloat(amplitudeSlider.value);
+            amplitudeValueDisplay.textContent = A_m.toFixed(1);
+
+            // 1. Remove old circle/markers/labels
+            scene.traverse((object) => {
+                if (object.name.startsWith("Marker-") || object.name.startsWith("Label-") || object.name === "PhasorCircle") {
+                    if (object.geometry) object.geometry.dispose();
+                    if (object.material) object.material.dispose();
+                    scene.remove(object);
+                }
+            });
+
+            // Recreate phasor and sine wave with new amplitude
+            scene.remove(phasorMesh);
+            scene.remove(sineWaveMesh);
+            
+            // Re-initialize necessary components
+            createPhasorCircle(); // Recreate circle and markers/labels
+            
+            phasorMesh = createPhasor(A_m);
+            scene.add(phasorMesh);
+            
+            sineWaveMesh = createSineWave(A_m);
+            scene.add(sineWaveMesh);
+            
+            // Update the display
+            updatePhasor(angleRad, A_m);
+            
+            // Adjust camera position slightly based on new amplitude if needed
+            if (camera.position.length() < A_m * 3) {
+                 camera.position.set(A_m * 2, A_m * 2, A_m * 3);
+            }
+        }
+        
+        function updatePhasor(newAngleRad, amplitude) {
+            // Guard clause to prevent errors before scene is initialized
+            if (!scene || typeof katex === 'undefined') return;
+
+            angleRad = newAngleRad;
+            const angleDeg = angleRad * 180 / Math.PI;
+
+            // 1. Update Phasor Rotation (around Z-axis)
+            // FIX: The cylinder geometry is built along the +Y axis. To make 0 degrees 
+            // align with the +X axis (standard), we must subtract PI/2 (-90 degrees) 
+            // from the desired rotation angle.
+            phasorMesh.rotation.z = newAngleRad - Math.PI / 2;
+
+            // 2. Calculate coordinates and A(t)
+            const x = amplitude * Math.cos(angleRad);
+            const y = amplitude * Math.sin(angleRad);
+            const zWave = 10; // Fixed length of the wave in Z units (from createSineWave)
+            
+            // The sine wave is plotted from 0 to 2*PI in Z space
+            const angle_scaled_z = (angleRad / (2 * Math.PI)) * zWave; 
+            const zOffset = -zWave / 2; // Sine wave starts at -5 and ends at 5
+            
+            const current_z = angle_scaled_z + zOffset; 
+            const A_t = y; // The instantaneous value A(t) is the Y-component of the phasor
+
+            // 3. Update Interaction Point position
+            interactionPoint.position.set(0, A_t, current_z);
+            
+            // 4. Update Projection Line
+            // Line 1: From phasor tip (x, y, 0) to interaction point (0, A_t, current_z)
+            const phasorTip = new THREE.Vector3(x, y, 0);
+            const wavePoint = new THREE.Vector3(0, A_t, current_z);
+            
+            // Line from phasor tip to projection on YZ plane
+            const phasorProjPoint = new THREE.Vector3(0, y, 0); // Projection onto Y-axis in Phasor plane
+
+            // Remove previous temporary lines
+            scene.traverse((object) => {
+                if (object.name === "timeLine" || object.name === "projectionLine") {
+                    if (object.geometry) object.geometry.dispose();
+                    if (object.material) object.material.dispose();
+                    scene.remove(object);
+                }
+            });
+
+            // Line 1: From Phasor Tip (x, y, 0) to YZ plane (0, y, 0)
+            const projectionLine = createDashedLine(phasorTip, new THREE.Vector3(0, y, 0), 0xffff00); // Yellow: X-Y projection
+            projectionLine.name = "projectionLine";
+            scene.add(projectionLine);
+            
+            // Line 2: The time line connecting phasor plane to wave point
+            const timeLine = createDashedLine(phasorProjPoint, wavePoint, 0x00ff00); // Green: Z-axis connection
+            timeLine.name = "timeLine";
+            scene.add(timeLine);
+
+
+            // 5. Update UI
+            angleValueDisplay.textContent = angleDeg.toFixed(1) + '\u00B0';
+            amplitudeValueDisplay.textContent = amplitude.toFixed(1);
+            
+            // --- KaTeX Dynamic Formula Rendering ---
+            const formulaText = `A(t) = ${amplitude.toFixed(1)} \\sin(${angleDeg.toFixed(1)}^\\circ)`;
+            
+            if (dynamicFormulaDisplay) {
+                // Render the entire dynamic formula using KaTeX
+                katex.render(formulaText, dynamicFormulaDisplay, { 
+                    displayMode: false,
+                    throwOnError: false // Prevents breaking the app if rendering fails
+                });
+            }
+
+            if (atResultValue) {
+                atResultValue.textContent = A_t.toFixed(2);
+            }
+            // --- End KaTeX Dynamic Formula Rendering ---
+            
+            // Ensure the slider is updated if the function was called internally (e.g., from initial setup)
+            angleSlider.value = angleDeg;
+            amplitudeSlider.value = amplitude;
+
+            // If sine wave exists, adjust its width based on amplitude for circle alignment
+            if (sineWaveMesh) {
+                sineWaveMesh.scale.y = A_m / 3; // Scale relative to initial A_m=3
+                sineWaveMesh.position.y = 0; // Keep it centered
+            }
+        }
+
+        // --- Event Handlers ---
+
+        function onWindowResize() {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        // --- Animation Loop ---
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        
+        // --- Custom Mouse Controls (Orbit) ---
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+
+        function setupMouseControls() {
+            // Note: renderer.domElement is only available after renderer is created in init()
+            if (!renderer || !renderer.domElement) return;
+
+            renderer.domElement.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            renderer.domElement.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+
+                const deltaX = e.clientX - previousMousePosition.x;
+                const deltaY = e.clientY - previousMousePosition.y;
+
+                // Simple rotation based on mouse movement
+                // Rotate around Y-axis for horizontal movement
+                const rotateSpeed = 0.005;
+                const rotationY = deltaX * rotateSpeed;
+                const rotationX = deltaY * rotateSpeed;
+
+                // Apply rotation
+                const pivot = new THREE.Vector3(0, 0, 0);
+                camera.position.sub(pivot);
+                
+                const rotationMatrix = new THREE.Matrix4().makeRotationY(-rotationY);
+                camera.position.applyMatrix4(rotationMatrix);
+                
+                // Rotation around X-axis (constrained to prevent camera flip)
+                const currentAngleX = Math.atan2(camera.position.y, Math.sqrt(camera.position.x * camera.position.x + camera.position.z * camera.position.z));
+                const newAngleX = currentAngleX - rotationX;
+                
+                // Constrain vertical orbit between -80 and +80 degrees
+                const maxAngle = Math.PI / 180 * 80;
+                if (Math.abs(newAngleX) < maxAngle) {
+                     const rotationMatrixX = new THREE.Matrix4().makeRotationX(rotationX);
+                     camera.position.applyMatrix4(rotationMatrixX);
+                }
+
+
+                camera.position.add(pivot);
+                camera.lookAt(pivot);
+
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            renderer.domElement.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+            
+            // Handle Zoom/Pinch (Mouse Wheel)
+            renderer.domElement.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const zoomSpeed = 0.002;
+                const distance = camera.position.length();
+                let newDistance = distance + e.deltaY * zoomSpeed * distance;
+
+                // Clamp distance to a reasonable range
+                const minDistance = 2;
+                const maxDistance = 30;
+                newDistance = Math.max(minDistance, Math.min(maxDistance, newDistance));
+
+                // Calculate the scaling factor
+                const scale = newDistance / distance;
+                
+                // Update camera position
+                camera.position.multiplyScalar(scale);
+                camera.lookAt(0, 0, 0);
+            });
+            
+            // Handle Touch (simplified drag for rotation)
+            let touchData = { current: null, prev: null };
+
+            renderer.domElement.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    touchData.prev = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                    isDragging = true;
+                }
+            }, { passive: true });
+
+            renderer.domElement.addEventListener('touchmove', (e) => {
+                if (isDragging && e.touches.length === 1) {
+                    touchData.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+
+                    const deltaX = touchData.current.x - touchData.prev.x;
+                    const deltaY = touchData.current.y - touchData.prev.y;
+
+                    const rotateSpeed = 0.01; // Increased speed for touch
+                    
+                    const rotationY = deltaX * rotateSpeed;
+                    const rotationX = deltaY * rotateSpeed;
+
+                    const pivot = new THREE.Vector3(0, 0, 0);
+                    camera.position.sub(pivot);
+                    
+                    // Y-axis rotation
+                    const rotationMatrixY = new THREE.Matrix4().makeRotationY(-rotationY);
+                    camera.position.applyMatrix4(rotationMatrixY);
+                    
+                    // X-axis rotation (constrained as before)
+                    const currentAngleX = Math.atan2(camera.position.y, Math.sqrt(camera.position.x * camera.position.x + camera.position.z * camera.position.z));
+                    const newAngleX = currentAngleX - rotationX;
+                    
+                    const maxAngle = Math.PI / 180 * 85;
+                    if (Math.abs(newAngleX) < maxAngle) {
+                         const rotationMatrixX = new THREE.Matrix4().makeRotationX(rotationX);
+                         camera.position.applyMatrix4(rotationMatrixX);
+                    }
+
+
+                    camera.position.add(pivot);
+                    camera.lookAt(pivot);
+
+                    touchData.prev = touchData.current;
+                }
+            }, { passive: false }); // Needs to be non-passive if you want to prevent scrolling, but let's allow scrolling for now
+
+            renderer.domElement.addEventListener('touchend', () => {
+                isDragging = false;
+                touchData.prev = null;
+                touchData.current = null;
+            });
+        }
+        
+        // --- Main Execution ---
+        init();
+        animate();
+
+    </script>
+</body>
+</html>
