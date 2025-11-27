@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LC Circuit Resonance Simulation</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Load Firebase Modules (Mandatory for Canvas Environment) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // --- Firebase Boilerplate ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        if (Object.keys(firebaseConfig).length > 0) {
+            const app = initializeApp(firebaseConfig);
+            window.db = getFirestore(app);
+            window.auth = getAuth(app);
+            // setLogLevel('debug'); // Uncomment for debugging
+            
+            if (initialAuthToken) {
+                signInWithCustomToken(window.auth, initialAuthToken)
+                    .then(() => console.log("Firebase signed in with custom token."))
+                    .catch(error => {
+                        console.error("Custom token sign-in failed:", error);
+                        signInAnonymously(window.auth).then(() => console.log("Signed in anonymously.")).catch(err => console.error("Anonymous sign-in failed:", err));
+                    });
+            } else {
+                signInAnonymously(window.auth)
+                    .then(() => console.log("Firebase signed in anonymously."))
+                    .catch(error => console.error("Anonymous sign-in failed:", error));
+            }
+        }
+        // --- End Firebase Boilerplate ---
+    </script>
+    <style>
+        /* Custom CSS for 3D Viewport */
+        #scene-container {
+            width: 100%;
+            height: 80vh; /* Takes 80% of viewport height */
+            background-color: #0d1117; /* Dark background for good contrast */
+            border-radius: 0.75rem; /* rounded-xl */
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            position: relative;
+            cursor: grab; /* Indicates it's interactive */
+        }
+        #scene-container.grabbing {
+            cursor: grabbing;
+        }
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Allows mouse events to pass through to the canvas unless on a specific element */
+        }
+        .current-graph {
+            width: 180px;
+            height: 120px;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            background: rgba(0, 0, 0, 0.4);
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            padding: 5px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            pointer-events: all; /* Make the graph clickable/interactive */
+        }
+        .graph-line {
+            position: absolute;
+            width: 2px;
+            background-color: #3b82f6; /* blue-500 */
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 p-4 font-sans antialiased">
+
+    <h1 class="text-3xl font-bold text-center mb-4 text-blue-400">LC Resonance & Oscillation Simulator</h1>
+
+    <div id="scene-container" class="mx-auto">
+        <!-- The Three.js scene will be injected here -->
+        <div class="ui-overlay">
+            
+            <!-- 2D Current vs Time Graph Overlay -->
+            <div id="graph" class="current-graph">
+                <div class="text-xs text-white/70 mb-1">Current (I) vs. Time (t)</div>
+                <div class="relative w-full h-[80px]">
+                    <!-- X and Y Axes -->
+                    <div class="absolute inset-0 border-b border-l border-gray-500"></div>
+                    <!-- Sine Wave Representation (for visual context) -->
+                    <svg class="absolute inset-0" viewBox="0 -100 100 200" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+                        <path id="current-curve" fill="none" stroke="#3b82f6" stroke-width="4" d="" />
+                    </svg>
+                    <!-- Current Pointer -->
+                    <div id="current-pointer" class="absolute w-2 h-2 rounded-full bg-yellow-400" style="left: 0; top: 50%; transform: translate(-50%, -50%);"></div>
+                </div>
+            </div>
+
+            <!-- Message Box for Alerts -->
+            <div id="message-box" class="absolute top-4 right-4 bg-yellow-600/90 text-white p-3 rounded-lg shadow-xl hidden transition-opacity duration-300" role="alert">
+                Simulation Running
+            </div>
+        </div>
+    </div>
+
+    <div class="flex flex-col sm:flex-row justify-center items-center space-y-4 sm:space-y-0 sm:space-x-4 p-4 bg-gray-800 rounded-xl mt-4">
+        <button id="toggle-sim" class="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-full shadow-lg transition duration-200">
+            Pause
+        </button>
+        <div class="flex items-center space-x-2">
+            <label for="L_slider" class="text-sm text-gray-400">Inductance (L):</label>
+            <input type="range" id="L_slider" min="0.1" max="2.0" value="1.0" step="0.1" class="w-24 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+            <span id="L_value" class="text-sm text-yellow-400">1.0 H</span>
+        </div>
+        <div class="flex items-center space-x-2">
+            <label for="C_slider" class="text-sm text-gray-400">Capacitance (C):</label>
+            <input type="range" id="C_slider" min="0.1" max="2.0" value="1.0" step="0.1" class="w-24 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+            <span id="C_value" class="text-sm text-yellow-400">1.0 F</span>
+        </div>
+        <div id="resonance-info" class="text-sm text-indigo-400">
+            Resonance Freq ($\omega$): 1.00 rad/s
+        </div>
+    </div>
+
+<script>
+    // Global Constants and Variables 
+    var scene, camera, renderer, light;
+    var isRunning = true;
+    var time = 0;
+    
+    // Physics parameters
+    var L = 1.0; // Inductance
+    var C = 1.0; // Capacitance
+    var omega = 1 / Math.sqrt(L * C); // Angular Resonance Frequency
+    const Q_max = 5.0; // Max Charge (Constant)
+    var I_max = omega * Q_max; // Max Current (Recalculated on L/C change)
+
+    // 3D Objects
+    let capacitorPlates = [];
+    let inductorCoil;
+    const currentDots = [];
+    let eFieldPlane;
+    const bFieldArrows = [];
+    const wirePath = []; // Array of points defining the circuit path
+
+    // Camera Control Variables
+    var isDragging = false;
+    var previousMousePosition = { x: 0, y: 0 };
+    const orbitCenter = new THREE.Vector3(0, 0, 0); // Center point for orbit
+    var radius = 20; // Initial distance from center (Z position)
+    var angleTheta = Math.PI / 2; // Polar angle (0 to PI)
+    var anglePhi = 0; // Azimuthal angle (0 to 2*PI)
+
+    // --- Utility Functions ---
+
+    /**
+     * Shows a message box temporarily.
+     * @param {string} message The message to display.
+     */
+    function showMessage(message) {
+        const box = document.getElementById('message-box');
+        box.textContent = message;
+        box.classList.remove('hidden', 'opacity-0');
+        box.classList.add('opacity-100');
+        setTimeout(() => {
+            box.classList.remove('opacity-100');
+            box.classList.add('opacity-0');
+            setTimeout(() => box.classList.add('hidden'), 300);
+        }, 2000);
+    }
+
+    /**
+     * Creates a Sprite object with text rendered onto a canvas texture.
+     * @param {string} message The text to display (e.g., "L" or "C").
+     * @param {THREE.Vector3} position The 3D position of the sprite.
+     * @param {number} scale The scale multiplier for the sprite size.
+     * @returns {THREE.Sprite} The configured Sprite object.
+     */
+    function createTextSprite(message, position, scale = 4) {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        const fontSize = 100;
+        
+        // Set canvas dimensions (4:1 aspect ratio for a short label)
+        canvas.width = 512;
+        canvas.height = 128;
+        
+        // Draw text
+        context.font = `bold ${fontSize}px Inter, sans-serif`;
+        context.fillStyle = '#fef08a'; // Yellow color for visibility
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText(message, canvas.width / 2, canvas.height / 2);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true, alphaTest: 0.1 });
+        const sprite = new THREE.Sprite(spriteMaterial);
+        
+        // Scale based on canvas aspect ratio to avoid stretching
+        sprite.scale.set(scale * (canvas.width / canvas.height), scale, 1);
+        sprite.position.copy(position);
+        
+        return sprite;
+    }
+
+
+    /**
+     * Updates the spherical coordinates (radius, theta, phi) to Cartesian coordinates 
+     * and sets the camera position.
+     */
+    function updateCameraPosition() {
+        // Clamp theta (polar angle) to prevent camera flipping
+        angleTheta = Math.max(0.1, Math.min(Math.PI - 0.1, angleTheta));
+
+        const sinTheta = Math.sin(angleTheta);
+        const cosTheta = Math.cos(angleTheta);
+        const sinPhi = Math.sin(anglePhi);
+        const cosPhi = Math.cos(anglePhi);
+
+        // Convert spherical to Cartesian coordinates (Y-up system)
+        camera.position.x = orbitCenter.x + radius * sinTheta * sinPhi;
+        camera.position.y = orbitCenter.y + radius * cosTheta;
+        camera.position.z = orbitCenter.z + radius * sinTheta * cosPhi;
+
+        camera.lookAt(orbitCenter);
+        camera.updateProjectionMatrix();
+    }
+
+
+    // --- Camera Control Handlers ---
+
+    function onMouseWheel(event) {
+        event.preventDefault(); 
+        const zoomSpeed = 0.005;
+        
+        // Adjust radius based on wheel delta (clamped between 5 and 50)
+        radius += event.deltaY * zoomSpeed * radius;
+        radius = Math.max(5, Math.min(50, radius));
+
+        updateCameraPosition();
+    }
+
+    function onMouseDown(e) {
+        // Check if the click is outside the graph overlay or controls
+        if (e.target.closest('#graph') || e.target.closest('button') || e.target.closest('input') || e.target.closest('label')) {
+            return;
+        }
+
+        isDragging = true;
+        previousMousePosition.x = e.clientX;
+        previousMousePosition.y = e.clientY;
+        document.getElementById('scene-container').classList.add('grabbing');
+    }
+
+    function onMouseUp(e) {
+        isDragging = false;
+        document.getElementById('scene-container').classList.remove('grabbing');
+    }
+
+    function onMouseMove(e) {
+        if (!isDragging) return;
+
+        const deltaX = e.clientX - previousMousePosition.x;
+        const deltaY = e.clientY - previousMousePosition.y;
+
+        const rotationSpeed = 0.005;
+        
+        // Update azimuthal angle (horizontal rotation)
+        anglePhi += deltaX * rotationSpeed;
+
+        // Update polar angle (vertical rotation)
+        angleTheta -= deltaY * rotationSpeed;
+        
+        updateCameraPosition();
+
+        previousMousePosition.x = e.clientX;
+        previousMousePosition.y = e.clientY;
+    }
+
+
+    /**
+     * Create the Inductor Coil Geometry.
+     * @returns {THREE.Line} The coil mesh.
+     */
+    function createInductorCoil() {
+        const radius = 2.0;
+        const turns = 10;
+        const height = 5.0;
+        const coilPoints = [];
+        
+        for (let i = 0; i <= 360 * turns; i++) {
+            const angle = i * (Math.PI / 180);
+            const x = radius * Math.cos(angle);
+            const y = radius * Math.sin(angle);
+            const z = (i / (360 * turns)) * height - (height / 2);
+            coilPoints.push(new THREE.Vector3(x, y, z));
+        }
+
+        const geometry = new THREE.BufferGeometry().setFromPoints(coilPoints);
+        const material = new THREE.LineBasicMaterial({ color: 0xcc6600, linewidth: 3 }); // Copper color
+        const coil = new THREE.Line(geometry, material);
+        coil.position.set(10, 0, 0); // Position the inductor
+        return coil;
+    }
+
+    /**
+     * Creates a simple wire segment.
+     * @param {THREE.Vector3} start Start point.
+     * @param {THREE.Vector3} end End point.
+     * @returns {THREE.Mesh} The wire mesh.
+     */
+    function createWire(start, end) {
+        const direction = new THREE.Vector3().subVectors(end, start);
+        const length = direction.length();
+        const wire = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.1, 0.1, length, 8),
+            new THREE.MeshBasicMaterial({ color: 0xcc6600 })
+        );
+        wire.position.addVectors(start, end).divideScalar(2);
+        wire.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+        return wire;
+    }
+
+    /**
+     * Defines the path for the current dots to follow.
+     */
+    function defineWirePath() {
+        // Points: Capacitor -> Top Wire -> Inductor Start -> Inductor End -> Bottom Wire -> Capacitor
+        const P1 = new THREE.Vector3(-8, 3, 0);
+        const P2 = new THREE.Vector3(5, 3, 0);
+        const P_Ind_Start = new THREE.Vector3(7.5, 3, 0);
+        const P_Ind_End = new THREE.Vector3(12.5, 3, 0);
+        const P3 = new THREE.Vector3(15, 3, 0);
+        const P4 = new THREE.Vector3(15, -3, 0);
+        const P5 = new THREE.Vector3(7.5, -3, 0);
+        const P6 = new THREE.Vector3(5, -3, 0);
+        const P7 = new THREE.Vector3(-8, -3, 0);
+
+        const points = [P1, P2, P_Ind_Start, P_Ind_End, P3, P4, P5, P6, P7];
+        
+        // Add segments to the scene and build the continuous path array
+        for(let i = 0; i < points.length - 1; i++) {
+            const start = points[i];
+            const end = points[i+1];
+            
+            if (i === 2) {
+                // Add the inductor coil points to the wirePath for dot movement
+                const coilRadius = 2.0;
+                const coilTurns = 10;
+                const coilHeight = 5.0;
+                const inductorOrigin = new THREE.Vector3(10, 0, 0);
+
+                for (let j = 0; j <= 360 * coilTurns; j += 10) { 
+                    const angle = j * (Math.PI / 180);
+                    const x_local = coilRadius * Math.cos(angle);
+                    const y_local = coilRadius * Math.sin(angle);
+                    const z_local = (j / (360 * coilTurns)) * coilHeight - (coilHeight / 2);
+                    
+                    const p = new THREE.Vector3(x_local + inductorOrigin.x, y_local + inductorOrigin.y, z_local);
+                    wirePath.push(p);
+                }
+            } else if (i === 3) {
+                 // Skip drawing connection wire after the inductor (covered by coil path)
+            } else {
+                const wire = createWire(start, end);
+                scene.add(wire);
+
+                // Add points along the straight wire segment to the path array
+                const numSegments = 20;
+                for (let j = 0; j <= numSegments; j++) {
+                    const t = j / numSegments;
+                    wirePath.push(start.clone().lerp(end, t));
+                }
+            }
+        }
+        
+        // Close the loop (from P7 back to P1)
+        const closingWire = createWire(P7, P1);
+        scene.add(closingWire);
+        const numSegments = 20;
+        for (let j = 0; j <= numSegments; j++) {
+            const t = j / numSegments;
+            wirePath.push(P7.clone().lerp(P1, t));
+        }
+    }
+
+    /**
+     * Creates the main 3D objects (Capacitor, Inductor, Wires) and labels.
+     */
+    function createCircuitObjects() {
+        // 1. Capacitor
+        const plateGeometry = new THREE.BoxGeometry(0.2, 5.0, 5.0);
+        const plateMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000, shininess: 50 });
+
+        const plate1 = new THREE.Mesh(plateGeometry, plateMaterial.clone());
+        plate1.position.set(-8, 0, 0);
+        scene.add(plate1);
+        capacitorPlates.push(plate1);
+
+        const plate2 = new THREE.Mesh(plateGeometry, plateMaterial.clone());
+        plate2.position.set(-7, 0, 0);
+        scene.add(plate2);
+        capacitorPlates.push(plate2);
+
+        // Electric Field Plane (Visualization)
+        const eFieldGeometry = new THREE.PlaneGeometry(1.0, 5.0);
+        eFieldPlane = new THREE.Mesh(
+            eFieldGeometry,
+            new THREE.MeshBasicMaterial({ color: 0x00aaff, side: THREE.DoubleSide, transparent: true, opacity: 0.0 })
+        );
+        eFieldPlane.position.set(-7.5, 0, 0);
+        scene.add(eFieldPlane);
+
+        // 2. Inductor
+        inductorCoil = createInductorCoil();
+        scene.add(inductorCoil);
+
+        // 3. Wires and Current Path
+        defineWirePath();
+
+        // 4. Current Dots
+        const dotGeometry = new THREE.SphereGeometry(0.3, 8, 8);
+        const dotMaterial = new THREE.MeshBasicMaterial({ color: 0x3b82f6 }); // blue-500
+        const numDots = 20;
+        for (let i = 0; i < numDots; i++) {
+            const dot = new THREE.Mesh(dotGeometry, dotMaterial);
+            currentDots.push(dot);
+            scene.add(dot);
+        }
+
+        // 5. Magnetic Field Arrows (B-field)
+        const arrowGeometry = new THREE.ConeGeometry(0.4, 1.0, 8);
+        const arrowMaterial = new THREE.MeshPhongMaterial({ color: 0xffcc00, shininess: 100 });
+        const numArrows = 6;
+        const coilRadius = 2.0;
+
+        for (let i = 0; i < numArrows; i++) {
+            const arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
+            // Position arrows around the coil axis (at x=10)
+            const angle = (i / numArrows) * 2 * Math.PI;
+            arrow.position.set(
+                10 + coilRadius * 1.5 * Math.cos(angle),
+                coilRadius * 1.5 * Math.sin(angle),
+                0
+            );
+            arrow.lookAt(inductorCoil.position);
+            arrow.rotation.z = Math.PI / 2; // Point outwards initially
+            bFieldArrows.push(arrow);
+            scene.add(arrow);
+        }
+
+        // 6. Labels (New addition)
+        
+        // Capacitor Label 'C'
+        const labelC = createTextSprite('C', new THREE.Vector3(-9.5, 0, 0), 4);
+        scene.add(labelC);
+
+        // Inductor Label 'L'
+        const labelL = createTextSprite('L', new THREE.Vector3(10, 4, 0), 3);
+        scene.add(labelL);
+    }
+
+    /**
+     * Updates the simulation state based on time.
+     */
+    function updateSimulation(deltaTime) {
+        if (!isRunning) return;
+
+        time += deltaTime;
+        
+        const current_I = -I_max * Math.sin(omega * time);
+        const charge_Q = Q_max * Math.cos(omega * time);
+
+        // --- 1. Current Visualization (Dots) ---
+        const pathLength = wirePath.length;
+        const direction = Math.sign(current_I);
+
+        currentDots.forEach((dot, index) => {
+            const dotOffset = (index / currentDots.length);
+            const timeOffset = (time * 0.5 * direction * omega) % 1.0;
+            let dotPositionIndex = dotOffset + timeOffset;
+            dotPositionIndex = (dotPositionIndex + 1.0) % 1.0; 
+            
+            const indexOnPath = Math.floor(dotPositionIndex * pathLength);
+            
+            let p1_idx = indexOnPath % pathLength;
+            let p2_idx = (indexOnPath + 1) % pathLength;
+            
+            const p1 = wirePath[p1_idx];
+            const p2 = wirePath[p2_idx];
+
+            const segmentT = (dotPositionIndex * pathLength) - indexOnPath;
+            const position = p1.clone().lerp(p2, segmentT);
+            
+            dot.position.copy(position);
+            dot.material.color.setHex(direction > 0 ? 0x3b82f6 : 0xff0000); // Blue or Red
+        });
+
+        // --- 2. Capacitor (Electric Field E) Visualization ---
+        const chargeRatio = charge_Q / Q_max;
+
+        if (chargeRatio > 0) {
+            capacitorPlates[0].material.color.setHex(0xcc6600); 
+            capacitorPlates[1].material.color.setHex(0x0000ff);
+        } else {
+            capacitorPlates[0].material.color.setHex(0x0000ff); 
+            capacitorPlates[1].material.color.setHex(0xcc6600);
+        }
+        
+        eFieldPlane.material.opacity = Math.abs(chargeRatio) * 0.4;
+
+        // --- 3. Inductor (Magnetic Field B) Visualization ---
+        const currentRatio = current_I / I_max;
+        const arrowScale = 1.0 + Math.abs(currentRatio) * 0.8;
+        const inductorCenter = inductorCoil.position;
+
+        bFieldArrows.forEach((arrow, index) => {
+            arrow.scale.set(arrowScale, arrowScale, arrowScale);
+            
+            // Orbiting effect for clearer B-field lines (Right-Hand Rule)
+            const orbitRadius = 2.5; 
+            const speedFactor = current_I * 0.2; // Speed and direction based on current
+            const initialAngle = (index / bFieldArrows.length) * 2 * Math.PI;
+            const angle = initialAngle + time * speedFactor;
+
+            // Update position to orbit around the coil's central axis (X=10)
+            arrow.position.x = inductorCenter.x;
+            arrow.position.y = inductorCenter.y + orbitRadius * Math.sin(angle);
+            arrow.position.z = inductorCenter.z + orbitRadius * Math.cos(angle);
+            
+            // Adjust rotation to maintain tangent direction (circular B-field)
+            if (current_I > 0) {
+                arrow.rotation.x = angle - Math.PI / 2;
+                arrow.rotation.y = Math.PI / 2;
+                arrow.rotation.z = 0;
+            } else {
+                 arrow.rotation.x = angle + Math.PI / 2;
+                 arrow.rotation.y = Math.PI / 2;
+                 arrow.rotation.z = 0;
+            }
+            
+            arrow.material.color.setHex(0xffcc00);
+            arrow.material.opacity = Math.max(0.2, Math.abs(currentRatio));
+        });
+        
+        // --- 4. 2D Graph Overlay Update ---
+        updateGraph(time, current_I);
+    }
+
+    /**
+     * Updates the 2D current graph overlay.
+     */
+    function updateGraph(t, I) {
+        const pointer = document.getElementById('current-pointer');
+        const curvePath = document.getElementById('current-curve');
+        
+        const graphWidth = 100;
+        const maxCurrent = I_max;
+
+        const timeScale = 10; 
+        const xNormalized = (t * timeScale) % graphWidth;
+        const xPercent = (xNormalized / graphWidth) * 100;
+        
+        const yNormalized = -I / maxCurrent; 
+        const yPercent = 50 - (yNormalized * 50);
+
+        // Update Pointer
+        pointer.style.left = `calc(${xPercent}% + 5px)`;
+        pointer.style.top = `${yPercent}%`;
+        
+        // Update Curve Path (Draw sine wave)
+        let svgPath = "M 0 50";
+        for (let x = 0; x <= 100; x++) {
+            const phase = (x / 100) * 2 * Math.PI * (graphWidth / timeScale) * omega;
+            const I_at_x = I_max * Math.sin(phase);
+            const y_at_x = 50 - (I_at_x / maxCurrent) * 50;
+            svgPath += ` L ${x} ${y_at_x}`;
+        }
+        
+        curvePath.setAttribute('d', svgPath);
+        
+        // Shift the SVG path to show the oscillating point
+        const totalPhaseShift = (time * omega) % (2 * Math.PI);
+        const shiftX = (totalPhaseShift / (2 * Math.PI)) * 100;
+        curvePath.style.transform = `translateX(-${shiftX}%)`;
+        curvePath.style.strokeDasharray = '5 5';
+    }
+
+    // --- Main Three.js Functions ---
+
+    function init() {
+        const container = document.getElementById('scene-container');
+        
+        // Scene setup
+        scene = new THREE.Scene();
+        scene.fog = new THREE.Fog(0x0d1117, 20, 100);
+
+        // Camera setup
+        camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+        updateCameraPosition(); // Set initial camera position based on current radius/angles
+
+        // Renderer setup
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setClearColor(0x0d1117, 1);
+        container.appendChild(renderer.domElement);
+
+        // Lighting
+        light = new THREE.DirectionalLight(0xffffff, 1.5);
+        light.position.set(10, 10, 10);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+        // Create the circuit and its elements
+        createCircuitObjects();
+        
+        // Add event listeners
+        window.addEventListener('resize', onWindowResize, false);
+        document.getElementById('toggle-sim').addEventListener('click', toggleSimulation);
+        document.getElementById('L_slider').addEventListener('input', updateLCParameters);
+        document.getElementById('C_slider').addEventListener('input', updateLCParameters);
+        
+        // Add camera control event listeners (Orbit + Zoom)
+        container.addEventListener('wheel', onMouseWheel, false);
+        container.addEventListener('mousedown', onMouseDown, false);
+        container.addEventListener('mousemove', onMouseMove, false);
+        container.addEventListener('mouseup', onMouseUp, false);
+        
+        // Touch events for mobile orbit/zoom (simplified)
+        container.addEventListener('touchstart', onTouchStart, false);
+        container.addEventListener('touchmove', onTouchMove, false);
+        container.addEventListener('touchend', onTouchEnd, false);
+
+
+        // Start animation loop
+        animate();
+    }
+
+    // --- Touch Control Handlers (Simplified for single-touch orbit) ---
+    var touchDistance = 0;
+
+    function onTouchStart(e) {
+        if (e.touches.length === 1) {
+            onMouseDown({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY, target: e.target });
+        } else if (e.touches.length === 2) {
+            isDragging = false; // Disable orbit during pinch-zoom
+            touchDistance = getTouchDistance(e.touches[0], e.touches[1]);
+        }
+    }
+
+    function onTouchMove(e) {
+        if (e.touches.length === 1 && isDragging) {
+            onMouseMove({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
+            e.preventDefault();
+        } else if (e.touches.length === 2) {
+            const newDistance = getTouchDistance(e.touches[0], e.touches[1]);
+            const delta = touchDistance - newDistance; 
+            
+            // Simulate mouse wheel based on pinch movement
+            onMouseWheel({ deltaY: delta * 0.5, preventDefault: () => {} }); 
+            
+            touchDistance = newDistance;
+            e.preventDefault();
+        }
+    }
+
+    function onTouchEnd(e) {
+        onMouseUp(e);
+    }
+    
+    function getTouchDistance(touch1, touch2) {
+        const dx = touch1.clientX - touch2.clientX;
+        const dy = touch1.clientY - touch2.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+    // --- End Touch Control Handlers ---
+
+
+    function onWindowResize() {
+        const container = document.getElementById('scene-container');
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    var lastTime = 0;
+    function animate(currentTime) {
+        requestAnimationFrame(animate);
+
+        const deltaTime = (currentTime - lastTime) / 1000 || 0;
+        lastTime = currentTime;
+        
+        updateSimulation(deltaTime);
+        
+        renderer.render(scene, camera);
+    }
+
+    /**
+     * Toggles the simulation running state.
+     */
+    function toggleSimulation() {
+        isRunning = !isRunning;
+        const button = document.getElementById('toggle-sim');
+        if (isRunning) {
+            button.textContent = 'Pause';
+            button.classList.remove('bg-red-600', 'hover:bg-red-700');
+            button.classList.add('bg-green-600', 'hover:bg-green-700');
+            showMessage("Simulation Resumed");
+        } else {
+            button.textContent = 'Play';
+            button.classList.remove('bg-green-600', 'hover:bg-green-700');
+            button.classList.add('bg-red-600', 'hover:bg-red-700');
+            showMessage("Simulation Paused");
+        }
+    }
+
+    /**
+     * Updates the L and C parameters from the sliders and recalculates omega.
+     */
+    function updateLCParameters() {
+        L = parseFloat(document.getElementById('L_slider').value);
+        C = parseFloat(document.getElementById('C_slider').value);
+        
+        document.getElementById('L_value').textContent = `${L.toFixed(1)} H`;
+        document.getElementById('C_value').textContent = `${C.toFixed(1)} F`;
+        
+        omega = 1 / Math.sqrt(L * C);
+        I_max = omega * Q_max; 
+        
+        document.getElementById('resonance-info').innerHTML = 
+            `Resonance Freq ($\omega$): ${omega.toFixed(2)} rad/s`;
+
+        time = 0;
+        if (!isRunning) toggleSimulation();
+        showMessage(`L and C updated. Frequency: ${omega.toFixed(2)} rad/s`);
+    }
+
+    window.onload = function() {
+        init();
+        showMessage("Simulation Started: Use mouse wheel to zoom, click and drag to orbit.");
+    };
+
+</script>
+</body>
+</html>
