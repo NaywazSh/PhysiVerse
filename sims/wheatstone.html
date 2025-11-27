@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Wheatstone Bridge Simulation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js Library --><script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Orbit Controls for 3D interaction --><script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Firebase SDK (Required for the environment, even if not used for data) --><script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        if (firebaseConfig) {
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            window.db = getFirestore(app);
+
+            async function authenticate() {
+                try {
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                        console.log("Firebase signed in with custom token.");
+                    } else {
+                        await signInAnonymously(auth);
+                        console.log("Firebase signed in anonymously.");
+                    }
+                } catch (error) {
+                    console.error("Firebase authentication error:", error);
+                }
+            }
+
+            authenticate();
+        }
+    </script>
+
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Inter', sans-serif; background-color: #1a202c; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: #48bb78;
+            font-size: 1.2rem;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+            pointer-events: none; /* Allows mouse events to pass through to the canvas */
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Wheatstone Bridge (3D Simulation)</div>
+    <div id="container"></div>
+
+    <script>
+        // --- 3D SETUP ---
+        let scene, camera, renderer, controls;
+        let currentParticles = [];
+        // Slowed down particle speed for better visualization of continuity
+        const currentSpeed = 0.03; 
+        const particleCount = 60; // Increased count for better visual density
+        
+        // New variables to hold the organized path segments
+        let continuousPaths = []; 
+        let segments = {};
+
+        // Component dimensions and colors
+        const WIRE_COLOR = 0xef4444; // Red
+        const RESISTOR_COLOR = 0x3b82f6; // Blue
+        const GALVANOMETER_COLOR = 0xf59e0b; // Orange
+        const BATTERY_COLOR = 0xfacc15; // Yellow
+
+        // Initial positions for the four main nodes (A, B, C, D) in the XZ plane
+        // A, C are the battery connection points (input/output)
+        // D, B are the galvanometer connection points (bridge)
+        const size = 5;
+        const nodes = {
+            A: new THREE.Vector3(0, 0, size),     // Top (Negative connection point)
+            B: new THREE.Vector3(size, 0, 0),     // Right
+            C: new THREE.Vector3(0, 0, -size),    // Bottom (Positive connection point)
+            D: new THREE.Vector3(-size, 0, 0),    // Left
+        };
+        
+        // Power connection points for the external battery line
+        // These are points on the same X-coordinate as the main circuit, but further out
+        const power_offset_x = size * 1.5;
+        const power_conn_pts_diamond = {
+            P_HORIZ_CORNER: new THREE.Vector3(power_offset_x, 0, nodes.C.z), // Horizontal corner from C
+            N_HORIZ_CORNER: new THREE.Vector3(power_offset_x, 0, nodes.A.z), // Horizontal corner from A
+        };
+
+        // Points defining the vertical battery line, extended to align with the horizontal corners
+        const BATTERY_X = size * 3;
+        const BATTERY_PTS = {
+            VERT_TOP: new THREE.Vector3(BATTERY_X, 0, power_conn_pts_diamond.P_HORIZ_CORNER.z), // Top of the vertical line
+            VERT_BOT: new THREE.Vector3(BATTERY_X, 0, power_conn_pts_diamond.N_HORIZ_CORNER.z),  // Bottom of the vertical line
+        };
+
+        // Battery component actual points for placement
+        const BATTERY_COMPONENT_LENGTH = 3;
+        const BATTERY_COMPONENT_POINTS = {
+            P_TERMINAL: new THREE.Vector3(BATTERY_X, 0, BATTERY_PTS.VERT_TOP.z + BATTERY_COMPONENT_LENGTH/2), // Actual positive terminal of component
+            N_TERMINAL: new THREE.Vector3(BATTERY_X, 0, BATTERY_PTS.VERT_BOT.z - BATTERY_COMPONENT_LENGTH/2),  // Actual negative terminal of component
+        };
+
+        // Initialize Three.js scene
+        function init() {
+            const container = document.getElementById('container');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a202c); // Dark background
+
+            // Camera setup
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 8, 10);
+            camera.lookAt(0, 0, 0);
+
+            // Renderer setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            container.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 10, 7);
+            scene.add(directionalLight);
+
+            // Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 5;
+            controls.maxDistance = 30;
+
+            // Build the circuit
+            buildCircuit();
+            // Setup current particles
+            setupCurrentParticles();
+
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Start animation loop
+            animate();
+        }
+
+        // Handle window resize
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Helper to create a wire segment
+        function createWireSegment(start, end, color = WIRE_COLOR) {
+            const geometry = new THREE.TubeGeometry(new THREE.LineCurve3(start, end), 32, 0.1, 8, false);
+            const material = new THREE.MeshBasicMaterial({ color: color });
+            const mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+            return mesh;
+        }
+
+        /**
+         * Reverses the direction of a THREE.LineCurve3 by swapping its start and end points.
+         * @param {THREE.LineCurve3} curve The curve to reverse.
+         * @returns {THREE.LineCurve3} A new LineCurve3 with the reversed direction.
+         */
+        function reverseCurve(curve) {
+            // LineCurve3 stores start point in v0 and end point in v1
+            return new THREE.LineCurve3(curve.v1, curve.v0);
+        }
+
+        // Helper to create a component (Resistor/Galvanometer/Battery)
+        function createComponent(start, end, color, name) {
+            // Calculate the midpoint
+            const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+            // Calculate the direction vector
+            const direction = new THREE.Vector3().sub(end, start);
+            const length = direction.length();
+            
+            // Create a component body (e.g., a box)
+            const componentThickness = 0.5;
+            let componentGeometry = new THREE.BoxGeometry(componentThickness, componentThickness, componentThickness);
+            
+            if (name.includes('Resistor')) {
+                // Adjust resistor shape to fit the segment
+                const componentLength = length * 0.4;
+                componentGeometry.parameters.depth = componentLength;
+                componentGeometry.parameters.height = componentThickness * 0.8;
+                componentGeometry.parameters.width = componentThickness * 0.8;
+            } else if (name === 'Battery') {
+                const batteryMesh = createBattery(midpoint);
+                // Rotate the battery to align vertically
+                const angle = direction.angleTo(new THREE.Vector3(0, 0, -1)); // Angle relative to negative Z (upward)
+                batteryMesh.rotation.y = Math.PI / 2; // Face components outward
+                batteryMesh.rotation.z = angle;
+                scene.add(batteryMesh);
+                return batteryMesh;
+            } else if (name === 'Galvanometer') {
+                 const dial = createGalvanometer(midpoint);
+                 scene.add(dial);
+                 return dial;
+            }
+
+            const componentMaterial = new THREE.MeshLambertMaterial({ color: color });
+            const componentMesh = new THREE.Mesh(componentGeometry, componentMaterial);
+
+            // Position and orient the component
+            componentMesh.position.copy(midpoint);
+            
+            // Apply rotation to align with the wire segment
+            if (length > 0) {
+                const orientation = new THREE.Quaternion();
+                // Calculate rotation from the default Z-axis to the direction vector
+                orientation.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction.normalize()); 
+                componentMesh.setRotationFromQuaternion(orientation);
+            }
+
+            scene.add(componentMesh);
+            return componentMesh;
+        }
+
+        // Special helper for Galvanometer (center component)
+        function createGalvanometer(position) {
+            const group = new THREE.Group();
+            group.position.copy(position);
+
+            // Dial casing (grey cylinder)
+            const casingGeometry = new THREE.CylinderGeometry(0.7, 0.7, 0.3, 32);
+            const casingMaterial = new THREE.MeshLambertMaterial({ color: 0xcccccc });
+            const casing = new THREE.Mesh(casingGeometry, casingMaterial);
+            casing.rotation.x = Math.PI / 2; // Lay flat
+            group.add(casing);
+
+            // Dial face (white circle)
+            const faceGeometry = new THREE.CircleGeometry(0.65, 32);
+            const faceMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+            const face = new THREE.Mesh(faceGeometry, faceMaterial);
+            face.position.z = 0.151; // Slightly above casing
+            group.add(face);
+
+            // Needle (red line)
+            const needleGeometry = new THREE.CylinderGeometry(0.02, 0.02, 0.6, 8);
+            const needleMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const needle = new THREE.Mesh(needleGeometry, needleMaterial);
+            needle.position.z = 0.155;
+            needle.rotation.y = Math.PI / 2;
+            needle.rotation.z = Math.PI / 4; // Initial slight deflection (unbalanced)
+            group.add(needle);
+            group.name = 'Galvanometer';
+
+            return group;
+        }
+
+        // Special helper for Battery (bottom component)
+        function createBattery(position) {
+            const group = new THREE.Group();
+            group.position.copy(position);
+
+            // Main body (dark grey cylinder)
+            const bodyGeometry = new THREE.CylinderGeometry(0.8, 0.8, BATTERY_COMPONENT_LENGTH, 32);
+            const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0x4a5568 });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            // We apply rotation in createComponent to align it vertically
+            group.add(body);
+
+            // Positive cap (yellow cylinder)
+            const posCapGeometry = new THREE.CylinderGeometry(0.8, 0.8, 0.1, 32);
+            const posCapMaterial = new THREE.MeshLambertMaterial({ color: BATTERY_COLOR });
+            const posCap = new THREE.Mesh(posCapGeometry, posCapMaterial);
+            posCap.position.y = BATTERY_COMPONENT_LENGTH / 2 + 0.05; // Along Y-axis now, slightly past end
+            group.add(posCap);
+
+            // Negative cap (grey cylinder)
+            const negCapGeometry = new THREE.CylinderGeometry(0.8, 0.8, 0.1, 32);
+            const negCapMaterial = new THREE.MeshLambertMaterial({ color: 0x718096 });
+            const negCap = new THREE.Mesh(negCapGeometry, negCapMaterial);
+            negCap.position.y = -BATTERY_COMPONENT_LENGTH / 2 - 0.05; // Along Y-axis now, slightly past end
+            group.add(negCap);
+            group.name = 'Battery';
+
+            return group;
+        }
+
+        // Function to create all circuit components and wires
+        function buildCircuit() {
+            // 1. Resistor arms (R1, R2, R3, R4)
+            const resistors = [
+                { start: nodes.A, end: nodes.B, color: RESISTOR_COLOR, name: 'Resistor R1' },
+                { start: nodes.B, end: nodes.C, color: RESISTOR_COLOR, name: 'Resistor R2' },
+                { start: nodes.C, end: nodes.D, color: RESISTOR_COLOR, name: 'Resistor R3' },
+                { start: nodes.D, end: nodes.A, color: RESISTOR_COLOR, name: 'Resistor R4' },
+            ];
+
+            // Add components and wires for the diamond
+            resistors.forEach(comp => {
+                const wire1_end = new THREE.Vector3().lerpVectors(comp.start, comp.end, 0.3);
+                const wire2_start = new THREE.Vector3().lerpVectors(comp.start, comp.end, 0.7);
+
+                createWireSegment(comp.start, wire1_end);
+                createWireSegment(wire2_start, comp.end);
+                createComponent(wire1_end, wire2_start, comp.color, comp.name);
+            });
+            
+            // 2. Galvanometer (G) between D and B
+            const galvanometer_start = nodes.D;
+            const galvanometer_end = nodes.B;
+
+            const g_wire1_end = new THREE.Vector3().lerpVectors(galvanometer_start, galvanometer_end, 0.3);
+            const g_wire2_start = new THREE.Vector3().lerpVectors(galvanometer_start, galvanometer_end, 0.7);
+            
+            createWireSegment(galvanometer_start, g_wire1_end, GALVANOMETER_COLOR);
+            createWireSegment(g_wire2_start, galvanometer_end, GALVANOMETER_COLOR);
+            createComponent(g_wire1_end, g_wire2_start, GALVANOMETER_COLOR, 'Galvanometer');
+
+            // 3. External Battery Connection and Placement
+            // Create the battery component first
+            createComponent(BATTERY_COMPONENT_POINTS.P_TERMINAL, BATTERY_COMPONENT_POINTS.N_TERMINAL, BATTERY_COLOR, 'Battery');
+
+            // Wires connecting C to Battery Positive Terminal (with right angles)
+            createWireSegment(nodes.C, power_conn_pts_diamond.P_HORIZ_CORNER); // Horizontal from C
+            createWireSegment(power_conn_pts_diamond.P_HORIZ_CORNER, BATTERY_PTS.VERT_TOP); // Vertical up to top of vertical line
+            createWireSegment(BATTERY_PTS.VERT_TOP, BATTERY_COMPONENT_POINTS.P_TERMINAL); // Vertical to Positive terminal
+
+            // Wires connecting A to Battery Negative Terminal (with right angles)
+            createWireSegment(nodes.A, power_conn_pts_diamond.N_HORIZ_CORNER); // Horizontal from A
+            createWireSegment(power_conn_pts_diamond.N_HORIZ_CORNER, BATTERY_PTS.VERT_BOT); // Vertical down to bottom of vertical line
+            createWireSegment(BATTERY_PTS.VERT_BOT, BATTERY_COMPONENT_POINTS.N_TERMINAL); // Vertical to Negative terminal
+
+
+            // --- Define Continuous Paths for Particle Flow ---
+            // Conventional Current Flow: P_TERMINAL -> C -> Split -> A -> Merge -> N_TERMINAL -> BATTERY_FLOW (N->P)
+
+            segments = {
+                // Connection segments from diamond to battery (for flow)
+                // Note: The visual wire segments are created by createWireSegment.
+                // These are logical paths for particles.
+                C_TO_P_HORIZ: new THREE.LineCurve3(nodes.C, power_conn_pts_diamond.P_HORIZ_CORNER),
+                P_HORIZ_TO_VERT_TOP: new THREE.LineCurve3(power_conn_pts_diamond.P_HORIZ_CORNER, BATTERY_PTS.VERT_TOP),
+                VERT_TOP_TO_BAT_P: new THREE.LineCurve3(BATTERY_PTS.VERT_TOP, BATTERY_COMPONENT_POINTS.P_TERMINAL),
+
+                A_TO_N_HORIZ: new THREE.LineCurve3(nodes.A, power_conn_pts_diamond.N_HORIZ_CORNER),
+                N_HORIZ_TO_VERT_BOT: new THREE.LineCurve3(power_conn_pts_diamond.N_HORIZ_CORNER, BATTERY_PTS.VERT_BOT),
+                VERT_BOT_TO_BAT_N: new THREE.LineCurve3(BATTERY_PTS.VERT_BOT, BATTERY_COMPONENT_POINTS.N_TERMINAL),
+                
+                // Battery internal flow
+                BATTERY_FLOW: new THREE.LineCurve3(BATTERY_COMPONENT_POINTS.N_TERMINAL, BATTERY_COMPONENT_POINTS.P_TERMINAL), // N -> P (Battery provides energy)
+                
+                // Diamond wire segments (used for flow)
+                A_TO_B: new THREE.LineCurve3(nodes.A, nodes.B), // Full segment (R1) - Top to Right
+                B_TO_C: new THREE.LineCurve3(nodes.B, nodes.C), // Full segment (R2) - Right to Bottom
+                C_TO_D: new THREE.LineCurve3(nodes.C, nodes.D), // Full segment (R3) - Bottom to Left
+                D_TO_A: new THREE.LineCurve3(nodes.D, nodes.A), // Full segment (R4) - Left to Top
+                D_TO_B: new THREE.LineCurve3(nodes.D, nodes.B), // Galvanometer full segment
+            };
+
+            // Loop 1 (Right Arm: P_TERMINAL -> C -> B -> A -> N_TERMINAL)
+            continuousPaths.push([
+                segments.VERT_TOP_TO_BAT_P,              // 1. BAT_P_TOP -> P_TERMINAL
+                segments.P_HORIZ_TO_VERT_TOP,            // 2. P_TERMINAL -> V_T -> P_H
+                segments.C_TO_P_HORIZ,                   // 3. P_H -> C
+                reverseCurve(segments.B_TO_C),           // 4. C -> B (R2 direction: B->C is Right->Bottom, reversed is Bottom->Right)
+                reverseCurve(segments.A_TO_B),           // 5. B -> A (R1 direction: A->B is Top->Right, reversed is Right->Top)
+                segments.A_TO_N_HORIZ,                   // 6. A -> N_H
+                segments.N_HORIZ_TO_VERT_BOT,            // 7. N_H -> V_B
+                segments.VERT_BOT_TO_BAT_N,              // 8. V_B -> N_TERMINAL
+                segments.BATTERY_FLOW,                   // 9. N_TERMINAL -> P_TERMINAL (Through battery, completing the loop N->P)
+            ]);
+
+            // Loop 2 (Left Arm: P_TERMINAL -> C -> D -> A -> N_TERMINAL)
+            continuousPaths.push([
+                segments.VERT_TOP_TO_BAT_P,              // 1. BAT_P_TOP -> P_TERMINAL
+                segments.P_HORIZ_TO_VERT_TOP,            // 2. P_TERMINAL -> V_T -> P_H
+                segments.C_TO_P_HORIZ,                   // 3. P_H -> C
+                segments.C_TO_D,                         // 4. C -> D (R3 direction: C->D is Bottom->Left)
+                segments.D_TO_A,                         // 5. D -> A (R4 direction: D->A is Left->Top. No reversal needed)
+                segments.A_TO_N_HORIZ,                   // 6. A -> N_H
+                segments.N_HORIZ_TO_VERT_BOT,            // 7. N_H -> V_B
+                segments.VERT_BOT_TO_BAT_N,              // 8. V_B -> N_TERMINAL
+                segments.BATTERY_FLOW,                   // 9. N_TERMINAL -> P_TERMINAL (Through battery, completing the loop N->P)
+            ]);
+            
+            // Bridge Path (D <-> B) - Oscillating flow
+            continuousPaths.push([
+                segments.D_TO_B
+            ]);
+        }
+
+        // Setup the current particles
+        function setupCurrentParticles() {
+            const particleGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+            const particleMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+            // Assign particles to one of the continuous loops or the bridge
+            for (let i = 0; i < particleCount; i++) {
+                const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+                particle.userData.t = Math.random(); 
+                particle.userData.offset = Math.random() * (1 / currentSpeed) * 0.1;
+
+                // 40% chance for Loop 1, 40% for Loop 2, 20% for Bridge
+                const distribution = Math.random();
+                if (distribution < 0.4) {
+                    particle.userData.pathType = 0; // Loop 1 (Right)
+                    particle.userData.speed = currentSpeed * (0.9 + Math.random() * 0.2); // slight variation
+                } else if (distribution < 0.8) {
+                    particle.userData.pathType = 1; // Loop 2 (Left)
+                    particle.userData.speed = currentSpeed * (0.9 + Math.random() * 0.2); // slight variation
+                } else {
+                    particle.userData.pathType = 2; // Bridge
+                    particle.material.color.set(GALVANOMETER_COLOR); // Color bridge flow orange
+                    particle.userData.speed = 0.01 * (0.9 + Math.random() * 0.2); // Oscillation speed
+                }
+                
+                particle.userData.segmentIndex = 0; // Start at the first segment of the chosen path
+                currentParticles.push(particle);
+                scene.add(particle);
+            }
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Update controls
+            controls.update();
+
+            // Animate current particles
+            currentParticles.forEach(particle => {
+                const pathType = particle.userData.pathType;
+                let segmentIndex = particle.userData.segmentIndex;
+                let t = particle.userData.t;
+                
+                // 1. Calculate next position based on type
+                if (pathType === 2) {
+                    // Bridge particles: simulate oscillation (unbalanced state)
+                    const bridgePath = continuousPaths[pathType][0];
+                    const oscillationSpeed = particle.userData.speed;
+                    // Use sin function to move t back and forth between 0 and 1
+                    t = (Math.sin(Date.now() * oscillationSpeed + particle.userData.offset) + 1) / 2;
+                    const point = bridgePath.getPointAt(t);
+                    particle.position.copy(point);
+                    particle.userData.t = t; // Keep t updated for the next frame
+                } else {
+                    // Main loop particles (PathType 0 or 1): continuous flow
+                    t += particle.userData.speed / 100;
+
+                    if (t > 1) {
+                        // Move to the next segment
+                        segmentIndex = (segmentIndex + 1) % continuousPaths[pathType].length;
+                        particle.userData.segmentIndex = segmentIndex;
+                        t = 0; // Reset t for the new segment
+                    }
+
+                    const currentSegment = continuousPaths[pathType][segmentIndex];
+                    if (currentSegment) {
+                        const point = currentSegment.getPointAt(t);
+                        particle.position.copy(point);
+                    }
+                    particle.userData.t = t;
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        // Start the simulation when the window loads
+        window.onload = init;
+    </script>
+</body>
+</html>
