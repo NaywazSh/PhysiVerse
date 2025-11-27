@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gauss's Law 3D Simulation</title>
+    <!-- Tailwind CSS for modern styling of UI elements -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter Font -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Prevent body scroll */
+            height: 100vh;
+            width: 100vw;
+            background-color: #1f2937; /* Dark gray background */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            /* Ensures the canvas takes up the full flex item space */
+        }
+        canvas {
+            display: block;
+        }
+        .formula-overlay {
+            position: absolute;
+            /* MOVED TO BOTTOM RIGHT CORNER */
+            bottom: 20px; 
+            right: 20px;
+            left: auto; /* Ensure it respects the right position */
+            transform: none; /* Removed horizontal centering */
+            
+            padding: 12px 24px;
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            z-index: 100;
+            text-align: center;
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #3b82f6; /* Blue text */
+        }
+    </style>
+    <!-- Three.js and OrbitControls for 3D graphics and interactivity -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="container">
+        <!-- Formula Display Overlay -->
+        <div class="formula-overlay flex flex-col md:flex-row items-center space-x-4">
+            <h1 class="text-xl font-bold text-gray-800">Gauss's Law:</h1>
+            
+            <!-- Manual Unicode/HTML formatting for robust display -->
+            <span class="flex items-center text-2xl font-serif text-gray-900 space-x-1">
+                <!-- \Phi_E -->
+                <span class="italic">&Phi;</span><sub class="text-base font-sans font-normal">E</sub> 
+                <span class="text-2xl mx-1">=</span>
+                
+                <!-- \oint E \cdot dA (Closed Line Integral - simplified for display) -->
+                <span class="text-3xl font-serif leading-none">&#x222E;</span>
+
+                <span class="font-bold italic">E</span><span class="text-lg translate-y-[-0.2em] inline-block">&#x20d7;</span> <!-- Vector E with arrow -->
+                <span class="mx-1">&middot;</span> <!-- Dot Product Symbol -->
+                <span class="font-bold italic">dA</span><span class="text-lg translate-y-[-0.2em] inline-block">&#x20d7;</span> <!-- Vector dA with arrow -->
+                
+                <span class="text-2xl mx-2">=</span>
+                
+                <!-- Q_{encl} / \epsilon_0 (Fraction) -->
+                <div class="flex flex-col items-center justify-center relative min-w-[3rem] text-xl">
+                    <!-- Numerator -->
+                    <span>Q<sub class="text-xs font-sans font-normal">encl</sub></span>
+                    <!-- Dividing Line (hr tag for separation) -->
+                    <hr class="w-full border-t-2 border-gray-900 my-0" />
+                    <!-- Denominator -->
+                    <span class="pt-0.5">&epsilon;<sub class="text-xs font-sans font-normal">0</sub></span>
+                </div>
+            </span>
+        </div>
+    </div>
+
+    <script>
+        // Global variables for Three.js scene components
+        let scene, camera, renderer, controls;
+        const container = document.getElementById('container');
+
+        // Configuration for the charges
+        const charges = [
+            { q: 1, pos: new THREE.Vector3(2, 1, 0), color: 0xf56565, label: 'q1', sign: '+' },
+            { q: 1, pos: new THREE.Vector3(-1.5, -1, 1), color: 0xed8936, label: 'q2', sign: '+' },
+            { q: -2, pos: new THREE.Vector3(0.5, 0, -2), color: 0x4299e1, label: 'q3', sign: '-' }
+        ];
+
+        // Sample point on the Gaussian surface for vector visualization
+        const samplePoint = new THREE.Vector3(5, 0, 0);
+        const gaussianRadius = 5.5;
+
+        // Initialize the 3D scene
+        function init() {
+            // 1. Scene setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1f2937); // Match body background
+
+            // 2. Camera setup (Perspective Camera)
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(0, 0, 10);
+
+            // 3. Renderer setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+
+            // 4. Orbit Controls (Movable Field/View)
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; // smooth rotation
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 2; // Min zoom
+            controls.maxDistance = 30; // Max zoom
+
+            // 5. Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 10, 7.5);
+            scene.add(directionalLight);
+
+            // 6. Build the simulation elements
+            buildSimulation();
+
+            // 7. Handle window resizing
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Start the animation loop
+            animate();
+        }
+
+        // Handle window resizing to keep the simulation responsive
+        function onWindowResize() {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        // Function to create all geometry for the simulation
+        function buildSimulation() {
+            // --- 1. Gaussian Surface (Transparent Sphere) ---
+            const surfaceGeometry = new THREE.SphereGeometry(gaussianRadius, 32, 32);
+            const surfaceMaterial = new THREE.MeshPhongMaterial({
+                color: 0xffffff, // Changed color to white
+                transparent: true,
+                opacity: 0.4, // Slightly increased opacity for better visibility of the white surface
+                side: THREE.DoubleSide,
+                // The Phong material provides a smooth, lit surface (like glass)
+            });
+            const gaussianSurface = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
+            gaussianSurface.name = 'GaussianSurface';
+            scene.add(gaussianSurface);
+
+            // --- 2. Charges ---
+            charges.forEach(charge => {
+                const chargeColor = charge.color;
+                const chargeGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+                const chargeMaterial = new THREE.MeshBasicMaterial({ color: chargeColor });
+                const chargeMesh = new THREE.Mesh(chargeGeometry, chargeMaterial);
+                chargeMesh.position.copy(charge.pos);
+                chargeMesh.name = `Charge_${charge.label}`;
+                scene.add(chargeMesh);
+
+                // Optional: Add a small text label (simplified, using a Sprite for simplicity)
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = 128;
+                canvas.height = 64;
+                context.font = 'Bold 30px Inter';
+                context.fillStyle = charge.sign === '+' ? '#f56565' : '#4299e1';
+                context.fillText(charge.sign, 10, 40);
+                context.fillText(charge.label.substring(1), 35, 40);
+
+                const texture = new THREE.CanvasTexture(canvas);
+                const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+                const sprite = new THREE.Sprite(spriteMaterial);
+                sprite.scale.set(1.5, 0.75, 1);
+                sprite.position.copy(charge.pos);
+                sprite.position.y += 0.5; // Lift label above the charge
+                scene.add(sprite);
+            });
+
+
+            // --- 3. Vector Visualization at Sample Point ---
+            // The Electric Field (E) calculation is conceptual for visualization purposes
+            // E-field is the sum of contributions from all charges (using Coulomb's law: E = kq/r^2)
+            let totalE = new THREE.Vector3(0, 0, 0);
+            const k = 1; // Simplification constant
+
+            charges.forEach(charge => {
+                const rVec = new THREE.Vector3().subVectors(samplePoint, charge.pos);
+                const rSq = rVec.lengthSq();
+
+                // E = (k * q / r^2) * r_hat
+                const E_magnitude = (k * charge.q) / rSq;
+                const E_vec = rVec.normalize().multiplyScalar(E_magnitude);
+
+                totalE.add(E_vec);
+            });
+
+            // Scale E vector for visualization (make it long enough)
+            const E_scale = 3 / totalE.length();
+            totalE.multiplyScalar(E_scale);
+
+            // A. Area Vector (dA) - Always normal to the surface
+            const dA_vector = samplePoint.clone().normalize().multiplyScalar(1.5); // Normal to sphere at this point
+            const dA_color = 0x2d9090; // Teal for Area Vector (dA)
+            const dA_arrow = new THREE.ArrowHelper(
+                dA_vector.normalize(),
+                samplePoint,
+                dA_vector.length(),
+                dA_color,
+                0.3,
+                0.3
+            );
+            dA_arrow.name = 'AreaVector';
+            scene.add(dA_arrow);
+
+            // B. Electric Field Vector (E)
+            const E_color = 0xff4757; // Red for Electric Field (E)
+            const E_arrow = new THREE.ArrowHelper(
+                totalE.clone().normalize(), // Direction
+                samplePoint,                 // Origin
+                totalE.length(),             // Length
+                E_color,
+                0.3,
+                0.3
+            );
+            E_arrow.name = 'ElectricFieldVector';
+            scene.add(E_arrow);
+
+            // C. Highlight the sample point
+            const pointGeometry = new THREE.SphereGeometry(0.15, 12, 12);
+            const pointMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const sampleDot = new THREE.Mesh(pointGeometry, pointMaterial);
+            sampleDot.position.copy(samplePoint);
+            scene.add(sampleDot);
+
+            // D. Connect the vectors to show the elemental area (dA)
+            // A small plane on the surface to represent dA
+            const planeSize = 1;
+            const planeGeometry = new THREE.PlaneGeometry(planeSize, planeSize, 1, 1);
+            const planeMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.1 });
+            const elementalArea = new THREE.Mesh(planeGeometry, planeMaterial);
+
+            // Position and orient the plane to be tangent at samplePoint
+            elementalArea.position.copy(samplePoint);
+            elementalArea.lookAt(new THREE.Vector3(0, 0, 0)); // Look towards the origin (normal will be outward)
+            elementalArea.rotateX(Math.PI / 2); // Plane is created in XY, need to rotate it to face out correctly
+
+            // The lookAt transformation is usually enough to align it correctly
+            // Create a temporary object to hold the transformation
+            const tempObject = new THREE.Object3D();
+            tempObject.position.copy(samplePoint);
+            tempObject.lookAt(new THREE.Vector3(0, 0, 0)); // This makes the +Z axis point inwards
+            // Rotate the plane to align its surface normal (which is +Z) with the radial vector
+            elementalArea.quaternion.copy(tempObject.quaternion);
+            elementalArea.rotateX(Math.PI / 2);
+            elementalArea.rotateZ(Math.PI); // Adjust for visual alignment
+            
+            scene.add(elementalArea);
+        }
+
+        // Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // only required if controls.enableDamping is set to true
+            renderer.render(scene, camera);
+        }
+
+        // Start the simulation when the window loads
+        window.onload = function () {
+            init();
+        }
+
+    </script>
+
+</body>
+</html>
