@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Standing Wave Simulation</title>
+    <!-- Load Tailwind CSS for modern styling --><script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Three.js for 3D rendering --><script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        /* Custom styles for the dark theme and canvas */
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Prevent scrolling */
+            background-color: #1a202c; /* Dark background */
+        }
+        #simulation-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #controls-panel {
+            z-index: 10;
+            position: absolute;
+            top: 10px;
+            left: 10px; /* MOVED TO LEFT */
+            padding: 1rem;
+            max-width: 250px; /* REDUCED WIDTH */
+            background-color: rgba(30, 41, 59, 0.9); /* Slate-800 */
+            border: 1px solid #4a5568; /* Gray-600 */
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="simulation-container">
+        <!-- The canvas will be injected here by Three.js --></div>
+
+    <!-- Controls Panel --><div id="controls-panel" class="rounded-lg text-white">
+        <h2 class="text-xl font-bold mb-4 text-green-400">Wave Controls</h2>
+
+        <!-- Mode (Harmonic) Control --><div class="mb-4">
+            <label for="mode-slider" class="block text-sm font-medium mb-1">
+                Harmonic Mode (n): <span id="mode-value" class="font-mono text-lg">1</span>
+            </label>
+            <input type="range" id="mode-slider" min="1" max="5" value="1" step="1"
+                   class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+            <p class="text-xs text-gray-400 mt-1">Changes the number of loops (standing wave pattern).</p>
+        </div>
+
+        <!-- Amplitude Control --><div class="mb-4">
+            <label for="amplitude-slider" class="block text-sm font-medium mb-1">
+                Amplitude (A): <span id="amplitude-value" class="font-mono text-lg">1.0</span>
+            </label>
+            <input type="range" id="amplitude-slider" min="0.2" max="2.0" value="1.0" step="0.1"
+                   class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+            <p class="text-xs text-gray-400 mt-1">Adjusts the maximum displacement of the wave.</p>
+        </div>
+
+        <!-- Frequency Control --><div class="mb-4">
+            <label for="frequency-slider" class="block text-sm font-medium mb-1">
+                Frequency (f): <span id="frequency-value" class="font-mono text-lg">1.0</span> Hz
+            </label>
+            <input type="range" id="frequency-slider" min="0.5" max="3.0" value="1.0" step="0.1"
+                   class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+            <p class="text-xs text-gray-400 mt-1">Changes the speed of oscillation (period of the wave).</p>
+        </div>
+
+        <p class="text-sm text-center pt-2 border-t border-gray-700 mt-4">
+            Drag the mouse to rotate. Scroll the mouse wheel to zoom!
+        </p>
+    </div>
+
+    <script type="module">
+        // --- 3D Simulation Setup (Three.js) ---
+
+        let scene, camera, renderer;
+        let particles = [];
+        const numParticles = 100;
+        const waveLengthL = 10; // Length of the 'string'
+        let modeN = 1;          // Harmonic mode (n=1, 2, 3...)
+        let amplitudeA = 1.0;   // Amplitude
+        let frequencyF = 1.0;   // Frequency (Hz)
+
+        // Camera control variables
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        let cameraRadius = 15; // Initial radius
+        const minRadius = 5;   // Closest zoom limit
+        const maxRadius = 25;  // Farthest zoom limit
+        let cameraAngleX = 0;
+        let cameraAngleY = 0.5; // Start slightly above the plane
+
+        // Function to initialize the 3D environment
+        function init() {
+            // 1. Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a202c); // Match body background
+
+            // 2. Camera Setup (Perspective)
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            updateCameraPosition();
+            camera.lookAt(0, 0, 0);
+
+            // 3. Renderer Setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('simulation-container').appendChild(renderer.domElement);
+
+            // 4. Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(5, 5, 5);
+            scene.add(directionalLight);
+
+            // 5. Create the Standing Wave Visualization (Particles)
+            const particleGeometry = new THREE.SphereGeometry(0.1, 16, 16);
+            const particleMaterial = new THREE.MeshPhongMaterial({ color: 0x34d399, shininess: 100 }); // Emerald green
+
+            for (let i = 0; i < numParticles; i++) {
+                // Normalized position along the string (0 to L)
+                const xPos = (i / (numParticles - 1)) * waveLengthL - (waveLengthL / 2); // Map to [-L/2, L/2]
+                const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+                particle.position.set(xPos, 0, 0);
+                scene.add(particle);
+                particles.push(particle);
+            }
+
+            // 6. Create the fixed endpoints (boundary conditions)
+            const fixedGeometry = new THREE.CylinderGeometry(0.2, 0.2, 3, 32);
+            const fixedMaterial = new THREE.MeshPhongMaterial({ color: 0xfb923c }); // Orange
+
+            const leftFixed = new THREE.Mesh(fixedGeometry, fixedMaterial);
+            leftFixed.position.set(-waveLengthL / 2, 0, 0);
+            scene.add(leftFixed);
+
+            const rightFixed = new THREE.Mesh(fixedGeometry, fixedMaterial);
+            rightFixed.position.set(waveLengthL / 2, 0, 0);
+            scene.add(rightFixed);
+
+            // 7. Add the equilibrium red line
+            const lineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 }); // Red line
+            const points = [];
+            points.push(new THREE.Vector3(-waveLengthL / 2, 0, 0)); // Start at left fixed point, y=0
+            points.push(new THREE.Vector3(waveLengthL / 2, 0, 0));  // End at right fixed point, y=0
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+            const equilibriumLine = new THREE.Line(lineGeometry, lineMaterial);
+            scene.add(equilibriumLine);
+
+            // 8. Event Listeners
+            window.addEventListener('resize', onWindowResize, false);
+            setupControls();
+            setupCameraControls();
+        }
+
+        // --- Camera Control Logic ---
+
+        function updateCameraPosition() {
+            const x = cameraRadius * Math.cos(cameraAngleY) * Math.sin(cameraAngleX);
+            const z = cameraRadius * Math.cos(cameraAngleY) * Math.cos(cameraAngleX);
+            const y = cameraRadius * Math.sin(cameraAngleY);
+
+            camera.position.set(x, y, z);
+            camera.lookAt(0, 0, 0);
+        }
+
+        function onMouseDown(event) {
+            isDragging = true;
+            previousMousePosition.x = event.clientX;
+            previousMousePosition.y = event.clientY;
+        }
+
+        function onMouseUp(event) {
+            isDragging = false;
+        }
+
+        function onMouseMove(event) {
+            if (!isDragging) return;
+
+            const deltaX = event.clientX - previousMousePosition.x;
+            const deltaY = event.clientY - previousMousePosition.y;
+
+            // Update camera angles (sensitivity adjustment)
+            cameraAngleX += deltaX * 0.005;
+            cameraAngleY += deltaY * 0.005;
+
+            // Clamp vertical angle to prevent camera flipping
+            const minAngleY = -Math.PI / 2 + 0.05; // Slightly above straight down
+            const maxAngleY = Math.PI / 2 - 0.05;  // Slightly below straight up
+            cameraAngleY = Math.max(minAngleY, Math.min(maxAngleY, cameraAngleY));
+
+            updateCameraPosition();
+
+            previousMousePosition.x = event.clientX;
+            previousMousePosition.y = event.clientY;
+        }
+
+        function onWheel(event) {
+            // Prevent default scroll behavior (like page scroll)
+            event.preventDefault();
+
+            // event.deltaY is negative when scrolling up (zoom in)
+            const zoomSpeed = 0.5;
+            // Adjust radius based on scroll amount
+            cameraRadius += event.deltaY * 0.01 * zoomSpeed; 
+
+            // Clamp the radius to enforce zoom limits
+            cameraRadius = Math.max(minRadius, Math.min(maxRadius, cameraRadius));
+
+            updateCameraPosition();
+        }
+
+        function setupCameraControls() {
+            renderer.domElement.addEventListener('mousedown', onMouseDown, false);
+            renderer.domElement.addEventListener('mousemove', onMouseMove, false);
+            renderer.domElement.addEventListener('mouseup', onMouseUp, false);
+            renderer.domElement.addEventListener('wheel', onWheel, false); // Added wheel listener for zoom
+        }
+
+        // --- UI Controls and Handlers ---
+
+        function setupControls() {
+            const modeSlider = document.getElementById('mode-slider');
+            const modeValueSpan = document.getElementById('mode-value');
+            const amplitudeSlider = document.getElementById('amplitude-slider');
+            const amplitudeValueSpan = document.getElementById('amplitude-value');
+            const frequencySlider = document.getElementById('frequency-slider');
+            const frequencyValueSpan = document.getElementById('frequency-value');
+
+            modeSlider.oninput = (e) => {
+                modeN = parseInt(e.target.value, 10);
+                modeValueSpan.textContent = modeN;
+            };
+
+            amplitudeSlider.oninput = (e) => {
+                amplitudeA = parseFloat(e.target.value);
+                amplitudeValueSpan.textContent = amplitudeA.toFixed(1);
+            };
+
+            frequencySlider.oninput = (e) => {
+                frequencyF = parseFloat(e.target.value);
+                frequencyValueSpan.textContent = frequencyF.toFixed(1);
+            };
+        }
+
+        // --- Animation Loop ---
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+
+            // Time variable for oscillation
+            // Time is multiplied by 2*PI*f to get the angular position
+            const t = time * 0.001 * 2 * Math.PI * frequencyF;
+
+            // Update particle positions
+            for (let i = 0; i < numParticles; i++) {
+                const particle = particles[i];
+                // xPos is in [-L/2, L/2]
+                const xPos = particle.position.x;
+
+                // Standing wave equation: y(x, t) = A * sin(k*x) * cos(w*t)
+                // where k = n*pi/L. We map x from [-L/2, L/2] to a full sine function.
+                // Using x' = x + L/2 to map x to [0, L]
+                const xMapped = xPos + waveLengthL / 2;
+
+                const spatialComponent = Math.sin((modeN * Math.PI * xMapped) / waveLengthL);
+                const temporalComponent = Math.cos(t);
+
+                // Calculate the final displacement in the Y-direction
+                const displacementY = amplitudeA * spatialComponent * temporalComponent;
+
+                particle.position.y = displacementY;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Start the simulation when the window loads
+        window.onload = function () {
+            init();
+            animate(0); // Start the animation loop
+        }
+    </script>
+
+</body>
+</html>
