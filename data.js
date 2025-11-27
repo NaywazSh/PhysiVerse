@@ -191,12 +191,12 @@ const simulations = [
     },
     {
         id: 502,
-        title: "Resonance",
+        title: "LC Resonance",
         topic: "EMI & AC",
         grade: "Grade 12",
         desc: "Find the resonant frequency where impedance is minimum.",
         image: "https://images.unsplash.com/photo-1621360841012-3f81e3309e3e?q=80&w=600&auto=format&fit=crop", 
-        file: "sims/resonance.html"
+        file: "sims/lc-resonance.html"
     },
     {
         id: 503,
