@@ -26,8 +26,10 @@
             height: 100vh;
         }
         #controls {
-            width: 300px;
-            padding: 20px;
+            /* --- EDITED: Reduced width for more space --- */
+            width: 180px; 
+            /* --- EDITED: Reduced padding to fit content better --- */
+            padding: 10px;
             background-color: #111827; /* Darker sidebar */
             color: #f3f4f6;
             overflow-y: auto;
@@ -42,7 +44,8 @@
         }
         .control-group {
             margin-bottom: 15px;
-            padding: 10px;
+            /* --- EDITED: Reduced padding to fit content better --- */
+            padding: 8px;
             border-radius: 8px;
             background-color: #1f2937;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
@@ -52,7 +55,8 @@
             font-weight: 600;
             margin-bottom: 5px;
             color: #9ca3af;
-            font-size: 0.9rem;
+            /* Slightly smaller font to fit narrow width */
+            font-size: 0.85rem; 
         }
         input[type="range"] {
             width: 100%;
@@ -72,12 +76,13 @@
             border-radius: 50%;
         }
         .output-value {
-            font-size: 1.2rem;
+            font-size: 1.1rem;
             font-weight: 700;
             color: #d1d5db;
         }
         .output-label {
-            font-size: 0.8rem;
+            /* Slightly smaller font to fit narrow width */
+            font-size: 0.75rem;
             color: #6b7280;
         }
     </style>
@@ -87,7 +92,7 @@
     <div id="app-container">
         <!-- Controls Sidebar -->
         <div id="controls">
-            <h1 class="text-2xl font-bold mb-6 text-white border-b border-blue-600 pb-2">Projectile Simulator</h1>
+            <h1 class="text-xl font-bold mb-4 text-white border-b border-blue-600 pb-2">Projectile Simulator</h1>
 
             <!-- Initial Velocity Control -->
             <div class="control-group">
@@ -107,27 +112,26 @@
                 <input type="range" id="gravity" min="1" max="30" value="9.81" step="0.01">
             </div>
 
-            <h2 class="text-xl font-semibold mt-8 mb-4 text-blue-400">Calculated Results</h2>
+            <h2 class="text-lg font-semibold mt-6 mb-3 text-blue-400">Calculated Results</h2>
 
             <!-- Results Display -->
-            <div class="grid grid-cols-2 gap-4">
-                <div class="text-center p-3 bg-gray-800 rounded-lg">
+            <div class="grid grid-cols-2 gap-2">
+                <div class="text-center p-2 bg-gray-800 rounded-lg">
                     <div class="output-value" id="range-result">0.00</div>
                     <div class="output-label">Range (R) [m]</div>
                 </div>
-                <div class="text-center p-3 bg-gray-800 rounded-lg">
+                <div class="text-center p-2 bg-gray-800 rounded-lg">
                     <div class="output-value" id="max-height-result">0.00</div>
                     <div class="output-label">Max Height (H) [m]</div>
                 </div>
-                <div class="text-center col-span-2 p-3 bg-gray-800 rounded-lg">
+                <div class="text-center col-span-2 p-2 bg-gray-800 rounded-lg">
                     <div class="output-value" id="time-result">0.00</div>
                     <div class="output-label">Time of Flight (T) [s]</div>
                 </div>
             </div>
 
-            <div class="mt-6 p-4 text-xs text-gray-400 border-t border-gray-700">
-                <p>Use your mouse to zoom, pan, and rotate the 3D scene.</p>
-                <p>The blue line represents the parabolic path of the projectile.</p>
+            <div class="mt-4 p-3 text-xs text-gray-400 border-t border-gray-700">
+                <p>Use mouse to zoom, pan, and rotate the 3D scene.</p>
             </div>
         </div>
 
