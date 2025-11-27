@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Angular Momentum Conservation 3D Simulation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        /* Custom CSS for the game aesthetic */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Bebas+Neue:wght@400&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117; /* Dark background */
+            color: #e6e6fa; /* Light text */
+            margin: 0;
+            overflow: hidden; /* Hide scrollbars */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #container {
+            width: 100%;
+            flex-grow: 1; /* Allow canvas to fill space */
+            position: relative;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #controls, #display {
+            background-color: #161b22;
+            padding: 1rem;
+            border-radius: 0.75rem;
+            margin: 0.5rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            border: 1px solid #30363d;
+        }
+
+        #controls {
+            width: 95%;
+            max-width: 500px;
+            z-index: 10;
+        }
+
+        #display {
+            position: absolute;
+            top: 10px;
+            left: 10px; /* Moved to the left */
+            font-family: 'Bebas Neue', cursive;
+            font-size: 0.8rem; /* Reduced font size */
+            z-index: 10;
+            min-width: 125px; /* Reduced min-width */
+            padding: 0.75rem; /* Adjusted padding */
+        }
+
+        .formula-text {
+            color: #79c0ff; /* GitHub Blue */
+            font-size: 1rem; /* Reduced font size */
+            margin-bottom: 0.25rem; /* Adjusted margin */
+        }
+
+        .data-point {
+            margin-top: 0.15rem; /* Adjusted margin */
+            color: #c9d1d9;
+        }
+        
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            background: #30363d;
+            border-radius: 5px;
+            outline: none;
+            opacity: 0.7;
+            transition: opacity .2s;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #58a6ff;
+            cursor: pointer;
+            box-shadow: 0 0 5px #58a6ff;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="container">
+        <!-- Three.js canvas will be injected here --></div>
+
+    <div id="display" class="space-y-2">
+        <!-- Changed to L = I omega (implied multiplication) for cleaner rendering -->
+        <div class="formula-text">$L = I \omega$</div> 
+        <!-- Simplified units for robustness in the rendering environment -->
+        <div class="data-point">$L$ (Angular Momentum): <span id="L_value">0.00</span> $\text{kg} \cdot \text{m}^2/\text{s}$</div>
+        <div class="data-point">$I$ (Moment of Inertia): <span id="I_value">0.00</span> $\text{kg} \cdot \text{m}^2$</div>
+        <div class="data-point">$\omega$ (Angular Velocity): <span id="omega_value">0.00</span> $\text{rad}/\text{s}$</div>
+    </div>
+
+    <div id="controls" class="flex flex-col space-y-4">
+        <div class="flex flex-col">
+            <label for="weight_pos" class="mb-2 text-sm font-semibold">Weight Distance from Axis (R): <span id="R_label">1.00</span> m</label>
+            <input type="range" id="weight_pos" min="0.5" max="2.0" value="1.0" step="0.01">
+        </div>
+        <div class="text-xs text-gray-400">
+            *In this simulation, Angular Momentum ($L$) is conserved. Changing the weight distance ($R$) changes the Moment of Inertia ($I$), which inversely scales the Angular Velocity ($\omega$).
+        </div>
+    </div>
+
+    <script>
+        // --- Angular Momentum Simulation Code ---
+        
+        // --- Global Constants ---
+        const DISK_MASS = 5.0; // Mass of the central disk (kg)
+        const WEIGHT_MASS = 2.0; // Mass of each weight (2 weights total) (kg)
+        const DISK_RADIUS = 2.0; // Radius of the disk (m)
+
+        // Initial values
+        const INITIAL_WEIGHT_POS = 1.0; // Initial distance of weights from axis (m)
+        const INITIAL_ANGULAR_VELOCITY = 1.5; // Initial angular velocity (rad/s)
+        
+        // Initial Moment of Inertia (I_disk + 2 * I_weights)
+        // I_disk = 0.5 * M * R^2
+        // I_weights = m * r^2
+        function calculateInertia(r) {
+            const I_disk = 0.5 * DISK_MASS * DISK_RADIUS * DISK_RADIUS;
+            const I_weights = 2 * WEIGHT_MASS * r * r;
+            return I_disk + I_weights;
+        }
+
+        let I_initial = calculateInertia(INITIAL_WEIGHT_POS);
+        let L_conserved = I_initial * INITIAL_ANGULAR_VELOCITY; // L is constant
+
+        let I_current = I_initial;
+        let omega_current = INITIAL_ANGULAR_VELOCITY;
+        let R_current = INITIAL_WEIGHT_POS;
+
+        // --- Three.js Setup ---
+        let scene, camera, renderer, container;
+        let diskMesh, axisMesh, weight1Mesh, weight2Mesh;
+        let controls; // Placeholder for camera controls
+
+        function init() {
+            container = document.getElementById('container');
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0d1117);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(0, 5, 5); // Start slightly above and back
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+
+            // Add basic lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 5); // soft white light
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 5);
+            directionalLight.position.set(5, 10, 7.5);
+            scene.add(directionalLight);
+
+            // Create objects (Axis, Disk, Weights)
+            createObjects();
+
+            // Set up OrbitControls for rotation and zooming
+            setupControls();
+
+            // Setup event listeners for the slider
+            setupEventListeners();
+
+            // Initial UI Update
+            updateDisplay();
+        }
+
+        function createObjects() {
+            // 1. Central Axis
+            const axisGeometry = new THREE.CylinderGeometry(0.1, 0.1, 8, 32);
+            const axisMaterial = new THREE.MeshPhongMaterial({ color: 0xcccccc });
+            axisMesh = new THREE.Mesh(axisGeometry, axisMaterial);
+            axisMesh.position.y = 0;
+            scene.add(axisMesh);
+
+            // 2. Disk (Platform)
+            const diskGeometry = new THREE.CylinderGeometry(DISK_RADIUS, DISK_RADIUS, 0.5, 64);
+            const diskMaterial = new THREE.MeshPhongMaterial({ color: 0x58a6ff, shininess: 80, transparent: true, opacity: 0.9 });
+            diskMesh = new THREE.Mesh(diskGeometry, diskMaterial);
+            diskMesh.rotation.x = Math.PI / 2; // Lay flat
+            diskMesh.position.y = 0;
+            scene.add(diskMesh);
+            
+            // 3. Weights (Two small square markers)
+            // Changed from Sphere to Box geometry for a more distinct marker/arrow look
+            const weightGeometry = new THREE.BoxGeometry(0.5, 0.5, 0.5); 
+            const weightMaterial = new THREE.MeshPhongMaterial({ color: 0xffa500, shininess: 100 }); // Orange color for visibility
+            
+            weight1Mesh = new THREE.Mesh(weightGeometry, weightMaterial);
+            weight2Mesh = new THREE.Mesh(weightGeometry, weightMaterial);
+
+            diskMesh.add(weight1Mesh); // Attach weights to the disk so they rotate with it
+            diskMesh.add(weight2Mesh);
+            
+            updateWeightPosition(R_current);
+        }
+
+        // Simpler implementation of OrbitControls (no external library)
+        function setupControls() {
+            let isDragging = false;
+            let previousMousePosition = { x: 0, y: 0 };
+
+            // Rotate on mouse drag
+            renderer.domElement.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                previousMousePosition.x = e.clientX;
+                previousMousePosition.y = e.clientY;
+            });
+
+            renderer.domElement.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+
+            renderer.domElement.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+
+                const deltaX = e.clientX - previousMousePosition.x;
+                const deltaY = e.clientY - previousMousePosition.y;
+
+                // Adjust camera rotation speed
+                const sensitivity = 0.005;
+
+                // Rotate around the central axis (Y-axis)
+                const azimuth = deltaX * sensitivity;
+                camera.rotation.y += azimuth;
+
+                // Adjust up/down rotation (X-axis)
+                // We'll use a Quaternion for smooth rotation and restrict it
+                const quaternion = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), azimuth);
+                camera.position.applyQuaternion(quaternion);
+
+                // Rotate camera around the origin
+                const radius = camera.position.length();
+                let theta = Math.atan2(camera.position.x, camera.position.z);
+                let phi = Math.acos(camera.position.y / radius);
+
+                theta += deltaX * sensitivity;
+                phi -= deltaY * sensitivity;
+
+                // Clamp phi to prevent flip-over
+                phi = Math.max(0.1, Math.min(Math.PI - 0.1, phi));
+
+                camera.position.x = radius * Math.sin(phi) * Math.sin(theta);
+                camera.position.y = radius * Math.cos(phi);
+                camera.position.z = radius * Math.sin(phi) * Math.cos(theta);
+
+                camera.lookAt(scene.position);
+
+                previousMousePosition.x = e.clientX;
+                previousMousePosition.y = e.clientY;
+            });
+
+            // Zoom on scroll
+            renderer.domElement.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const zoomSpeed = 0.1;
+                const distance = camera.position.length();
+
+                if (e.deltaY > 0) {
+                    // Zoom out
+                    camera.position.multiplyScalar(1 + zoomSpeed);
+                } else {
+                    // Zoom in, but limit how close we can get
+                    if (distance > 3) {
+                        camera.position.multiplyScalar(1 - zoomSpeed);
+                    }
+                }
+                camera.lookAt(scene.position);
+            });
+        }
+
+        function updateWeightPosition(r) {
+            // Update the positions of the two weights along the x-axis of the disk
+            weight1Mesh.position.x = r;
+            weight1Mesh.position.y = 0.5; // Set marker center 0.25 (disk height/2) + 0.25 (marker height/2)
+            weight1Mesh.position.z = 0;
+            
+            weight2Mesh.position.x = -r;
+            weight2Mesh.position.y = 0.5; // Set marker center 0.25 (disk height/2) + 0.25 (marker height/2)
+            weight2Mesh.position.z = 0;
+            
+            // Update the current state based on the new radius R
+            R_current = r;
+            I_current = calculateInertia(r);
+            
+            // Conservation of Momentum: L = I * omega -> omega = L / I
+            if (I_current > 0) {
+                omega_current = L_conserved / I_current;
+            } else {
+                omega_current = 0; // Avoid division by zero
+            }
+            
+            updateDisplay();
+        }
+
+        function updateDisplay() {
+            document.getElementById('L_value').textContent = L_conserved.toFixed(2);
+            document.getElementById('I_value').textContent = I_current.toFixed(2);
+            document.getElementById('omega_value').textContent = omega_current.toFixed(2);
+            document.getElementById('R_label').textContent = R_current.toFixed(2);
+        }
+
+        function setupEventListeners() {
+            const slider = document.getElementById('weight_pos');
+            slider.addEventListener('input', (e) => {
+                const r = parseFloat(e.target.value);
+                updateWeightPosition(r);
+            });
+            
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize, false);
+        }
+        
+        function onWindowResize() {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        // --- Animation Loop ---
+        const clock = new THREE.Clock();
+        
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta(); // Time elapsed since last frame
+            
+            // Disk rotation based on current angular velocity
+            // Rotation in radians = angular velocity (rad/s) * time (s)
+            diskMesh.rotation.y += omega_current * delta;
+
+            renderer.render(scene, camera);
+        }
+
+        // Initialize and start the simulation when the window loads
+        window.onload = function () {
+            init();
+            animate();
+        };
+
+    </script>
+</body>
+</html>
