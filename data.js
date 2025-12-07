@@ -19,7 +19,7 @@ const simulations = [
         topic: "Kinematics",
         grade: "FREE • Grade 11",
         desc: "Launch objects at different angles and velocities to understand parabolic trajectories.",
-        image: "https://images.unsplash.com/photo-1571322738251-e7abd92d00f7?q=80&w=600&auto=format&fit=crop", 
+        image: "https://pixabay.com/photos/bullet-projectile-ancient-civil-war-1128972/?q=80&w=600&auto=format&fit=crop", 
         file: "sims/projectile.html" 
     },
 
