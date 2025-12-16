@@ -83,7 +83,60 @@
     <footer class="border-t border-slate-800 bg-slate-900 pt-16 pb-8 text-center text-slate-500 text-sm">
         <p>&copy; 2025 PhysiVerse.</p>
     </footer>
+<!-- PAYMENT MODAL (Hidden by default) -->
+<div id="paymentModal" class="fixed inset-0 z-[100] hidden">
+    <!-- Backdrop -->
+    <div class="absolute inset-0 bg-slate-900/90 backdrop-blur-sm" onclick="closePaymentModal()"></div>
+    
+    <!-- Modal Content -->
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-fade-in">
+        
+        <!-- Header -->
+        <div class="bg-slate-900 p-6 text-center border-b border-slate-800 relative">
+            <button onclick="closePaymentModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white">
+                <i class="fa-solid fa-xmark text-xl"></i>
+            </button>
+            <h3 class="text-xl font-bold text-white">Unlock Premium Access</h3>
+            <p class="text-cyan-400 text-sm mt-1">Full Syllabus • Lifetime Access</p>
+        </div>
 
+        <!-- Body -->
+        <div class="p-8">
+            <div class="text-center mb-8">
+                <span class="text-4xl font-extrabold text-slate-900">৳ 500</span>
+                <span class="text-slate-500"> / one-time</span>
+            </div>
+
+            <!-- Payment Methods -->
+            <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Select Payment Method</p>
+            <div class="grid grid-cols-3 gap-3 mb-6">
+                <button onclick="selectMethod('bkash')" id="btn-bkash" class="payment-btn border-2 border-slate-200 rounded-lg p-3 hover:border-pink-500 hover:bg-pink-50 transition flex flex-col items-center gap-2">
+                    <img src="https://raw.githubusercontent.com/Shipu/bkash-example/master/bkash_payment_logo.png" alt="bKash" class="h-8 object-contain">
+                    <span class="text-[10px] font-bold text-slate-600">bKash</span>
+                </button>
+                
+                <button onclick="selectMethod('rocket')" id="btn-rocket" class="payment-btn border-2 border-slate-200 rounded-lg p-3 hover:border-purple-500 hover:bg-purple-50 transition flex flex-col items-center gap-2">
+                    <img src="https://play-lh.googleusercontent.com/s642wDMrv2j9uJ_aN53x0Y5W48O0dO6-gMAu2Wn4X1p-Ie8hC2_t9W5cZ-fXvT2vQ4c" alt="Rocket" class="h-8 rounded object-contain">
+                    <span class="text-[10px] font-bold text-slate-600">Rocket</span>
+                </button>
+                
+                <button onclick="selectMethod('nagad')" id="btn-nagad" class="payment-btn border-2 border-slate-200 rounded-lg p-3 hover:border-orange-500 hover:bg-orange-50 transition flex flex-col items-center gap-2">
+                    <img src="https://play-lh.googleusercontent.com/1-hPxafOxdYpYZEOKzNIkSP43HXCNftVJVtqw4CT157Od8R872t5w8vf6s296jboX60" alt="Nagad" class="h-8 rounded object-contain">
+                    <span class="text-[10px] font-bold text-slate-600">Nagad</span>
+                </button>
+            </div>
+
+            <!-- Action Button -->
+            <button onclick="initiatePayment()" id="payBtn" class="w-full bg-slate-900 hover:bg-cyan-600 text-white font-bold py-4 rounded-xl transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                Proceed to Pay
+            </button>
+            
+            <p class="text-[10px] text-center text-slate-400 mt-4">
+                <i class="fa-solid fa-lock mr-1"></i> Secure Payment Gateway
+            </p>
+        </div>
+    </div>
+</div>
     <script src="data.js"></script>
     <script src="main.js"></script>
 </body>
